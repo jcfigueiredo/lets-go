@@ -1,12 +1,22 @@
 """Shared pytest fixtures.
 
-This file is intentionally minimal at this stage. Task 7 will add a
-SAVEPOINT-isolated `db` session fixture; for now, this file owns the
-environment-variable hygiene fixture that prevents stale exports from
-shadowing default settings tests.
+This module owns:
+
+- ``_isolate_settings_env`` (autouse) — strips settings env vars before
+  every test, so stale shell exports never shadow defaults.
+- ``test_engine`` (session) — a SQLAlchemy engine bound to
+  ``TEST_DATABASE_URL`` for tests that need a real connection.
+- ``db`` (per-test) — a ``Session`` wrapped in an outer transaction and
+  a SAVEPOINT, providing rollback isolation between tests.
 """
 
+from collections.abc import Iterator
+
 import pytest
+from sqlalchemy import Connection, Engine, create_engine, event
+from sqlmodel import Session
+
+from lab.config import get_settings
 
 
 @pytest.fixture(autouse=True)
@@ -20,3 +30,42 @@ def _isolate_settings_env(monkeypatch: pytest.MonkeyPatch) -> None:
     """
     monkeypatch.delenv("DATABASE_URL", raising=False)
     monkeypatch.delenv("TEST_DATABASE_URL", raising=False)
+
+
+@pytest.fixture(scope="session")
+def test_engine() -> Iterator[Engine]:
+    """Session-scoped engine bound to TEST_DATABASE_URL."""
+    engine = create_engine(get_settings().TEST_DATABASE_URL, future=True)
+    try:
+        yield engine
+    finally:
+        engine.dispose()
+
+
+@pytest.fixture
+def db(test_engine: Engine) -> Iterator[Session]:
+    """Per-test session with SAVEPOINT-based rollback isolation.
+
+    Each test runs inside an outer transaction. A SAVEPOINT is opened so
+    that ``session.commit()`` inside the test commits the savepoint (not
+    the outer transaction); the outer transaction is always rolled back
+    at teardown, so the database is unchanged between tests.
+    """
+    connection: Connection = test_engine.connect()
+    outer = connection.begin()
+    session = Session(bind=connection)
+    nested = connection.begin_nested()
+
+    @event.listens_for(session, "after_transaction_end")
+    def _restart_savepoint(sess: Session, transaction) -> None:
+        nonlocal nested
+        if transaction.nested and not transaction._parent.nested:
+            nested = connection.begin_nested()
+
+    try:
+        yield session
+    finally:
+        session.close()
+        if outer.is_active:
+            outer.rollback()
+        connection.close()

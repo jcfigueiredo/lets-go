@@ -8,7 +8,7 @@ help: ## Show this help message
 setup: ## Install Python deps via uv
 	uv sync
 
-test: ## Run pytest with 100% branch coverage enforced
+test: migrate-test ## Run pytest with 100% branch coverage enforced
 	uv run pytest
 
 .PHONY: up down db-shell clean
