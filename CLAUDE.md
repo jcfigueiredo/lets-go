@@ -4,7 +4,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Repository status
 
-This is a **greenfield take-home exercise**. As of this writing the repo contains only the spec (`lab-experiment-tracking-system.txt`) — no source code, no migrations, no Docker config, no README. There are no build/test/lint commands to document yet; add them here once the toolchain is chosen.
+This is a **take-home interview exercise** for a "laboratory experiment tracking system." Spec at `lab-experiment-tracking-system.txt`. Design at `docs/superpowers/specs/2026-05-12-core-infra-design.md`. Implementation plan at `docs/superpowers/plans/2026-05-12-core-infra.md`.
+
+**Current state:** Core infra landed. Schema design (Researcher/Project/Experiment/Sample/Measurement) is **deferred** to a follow-up spec + plan cycle.
 
 ## What this project is
 
@@ -19,25 +21,40 @@ A data model for a **laboratory experiment tracking system**, delivered as Postg
 
 ## Required deliverables (from the spec)
 
-1. **Single-command bootstrap**: `git clone` → run one documented command → running Postgres with schema + seed data. This command must be in the README.
+1. **Single-command bootstrap**: `make start` → Postgres running with schema + seed data.
 2. **Seed data that exercises the interesting parts** — at minimum: one project with multiple researchers, an experiment that references an earlier experiment, a sample used across multiple experiments, and measurements of more than one kind.
-3. **README** must cover: (a) the one-command bootstrap, (b) assumptions made about ambiguities, (c) tradeoffs including **at least one thing deliberately not done**, (d) open questions for the lab.
+3. **README** covering: (a) the one-command bootstrap, (b) assumptions made about ambiguities, (c) tradeoffs including **at least one thing deliberately not done**, (d) open questions for the lab.
+
+## Commands
+
+The Makefile is the only user-facing surface. `make help` lists everything. Key targets:
+
+- `make start` — one-command bootstrap (up + migrate + seed)
+- `make up` / `make down` — start/stop Postgres
+- `make migrate` — apply pending migrations
+- `make migration m="…"` — autogenerate a new revision
+- `make test` — pytest with 100% branch coverage enforced (depends on `migrate-test`)
+- `make test-one T=path` — run a single test (no coverage gate)
+- `make coverage` — pytest + open HTML report (depends on `migrate-test`)
+- `make lint` / `make format` — ruff
+- `make db-shell` — psql into lab
+- `make clean` — destroy volume (prompts)
+
+## Architecture
+
+- Postgres 16 in `docker-compose.yml` on a **dynamically assigned host port**. `make up` writes the actual port into `.env`. Do not hard-code `localhost:5432`.
+- `src/lab/`: `config.py` (pydantic-settings), `db.py` (sync engine), `models/` (SQLModel — schema source of truth, currently empty), `seed.py` (no-op stub).
+- `alembic/`: env.py reads `get_settings().DATABASE_URL`; `make migrate-test` overrides to `TEST_DATABASE_URL` via shell.
+- `tests/conftest.py`: autouse env-isolation fixture, session-scoped `test_engine` bound to `TEST_DATABASE_URL`, per-test `db` fixture using the canonical SQLAlchemy SAVEPOINT pattern.
 
 ## How to approach work here
 
-The spec explicitly says: *"We'd much rather see a decisive model built on explicit assumptions than a hesitant one that hedges against every possibility."* This shapes how to make decisions in this repo:
+The take-home spec explicitly says: *"We'd much rather see a decisive model built on explicit assumptions than a hesitant one that hedges against every possibility."* This shapes how to make decisions:
 
-- **Decide and document, don't hedge.** When the spec is ambiguous (e.g., is researcher role global or per-project? can a measurement exist without a sample? are sample types an enum or free-text?), pick a defensible answer and write the assumption into the README. Don't add columns "just in case."
-- **The interview extends this live.** Choices will be defended and modified in a follow-up session, so favor designs that are easy to *explain* over designs that are clever. Avoid premature normalization or abstraction that you can't justify in one sentence.
-- **Measurement polymorphism is the load-bearing design call.** Common options: single table with nullable typed columns; single table + JSONB value; table-per-type with a parent; EAV. Each has different ergonomics for adding a new measurement kind later — pick one and be ready to defend the tradeoff in the README's "tradeoffs" section.
+- **Decide and document, don't hedge.** When the spec is ambiguous, pick a defensible answer and write the assumption into the README.
+- **The interview extends this live.** Choices will be defended and modified in a follow-up session. Favor designs that are easy to explain.
+- **Measurement polymorphism is the load-bearing design call** for the schema follow-up.
 
-## When this file should be updated
+## Coverage discipline
 
-Once the toolchain lands (migration tool, Docker setup, language choice for any tooling scripts), replace this section with the actual commands:
-
-- How to start the database (the one-command bootstrap)
-- How to run migrations up/down
-- How to reset and re-seed
-- How to run a single test, once tests exist
-
-Until then, don't invent commands here.
+100% branch coverage is enforced from commit #1 via `addopts` in `pyproject.toml`. Every commit must pass `make test`. Excluded from coverage: `alembic/versions/**`, `alembic/env.py`, `__main__` shims, anything marked `# pragma: no cover` (with an inline comment justifying why).

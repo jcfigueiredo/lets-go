@@ -88,6 +88,11 @@ coverage cannot land.
   instances; the Makefile writes `.env` with the actual port. Reviewers
   on a clean machine will see a different port on every `make up` and
   this is intentional.
+- `tests/test_db.py` connects to the dev `lab` database (not `lab_test`).
+  The query is a read-only `SELECT 1`, so this is harmless — but `make
+  test` requires `make up` to have populated `.env` with a live host
+  port. `make start` covers both. See Enhancement G in
+  `docs/future-enhancements.md`.
 
 > Schema-level assumptions (researcher roles, measurement polymorphism,
 > cascade behavior, etc.) land with the schema follow-up.

@@ -5,7 +5,7 @@
 help: ## Show this help message
 	@awk 'BEGIN {FS = ":.*##"; printf "Usage:\n  make \033[36m<target>\033[0m\n\nTargets:\n"} /^[a-zA-Z_-]+:.*?##/ { printf "  \033[36m%-20s\033[0m %s\n", $$1, $$2 }' $(MAKEFILE_LIST)
 
-setup: ## Install Python deps via uv
+setup: ## Install Python deps via uv (.env is managed by `make up`)
 	uv sync
 
 test: migrate-test ## Run pytest with 100% branch coverage enforced
@@ -64,9 +64,9 @@ start: ## One-command bootstrap: up + migrate + seed
 
 test-one: ## Run a single test path; usage: make test-one T=tests/test_foo.py::test_bar
 	@test -n "$(T)" || (echo "Usage: make test-one T=tests/path::test_name"; exit 1)
-	uv run pytest $(T) -v
+	uv run pytest $(T) -v --no-cov
 
-coverage: ## Run pytest and open the HTML coverage report
+coverage: migrate-test ## Run pytest and open the HTML coverage report
 	uv run pytest --cov-report=html
 	@command -v open >/dev/null 2>&1 && open htmlcov/index.html || echo "Open htmlcov/index.html manually"
 
