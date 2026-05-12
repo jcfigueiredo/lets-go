@@ -40,6 +40,8 @@ The Makefile is the only user-facing surface. `make help` lists everything. Key 
 - `make db-shell` — psql into lab
 - `make clean` — destroy volume (prompts)
 
+> `make start` bootstraps the database; it does NOT run tests. Run `make test` separately when you want a green-suite verification (it depends on `migrate-test`).
+
 ## Architecture
 
 - Postgres 16 in `docker-compose.yml` on a **dynamically assigned host port**. `make up` writes the actual port into `.env`. Do not hard-code `localhost:5432`.
@@ -58,3 +60,22 @@ The take-home spec explicitly says: *"We'd much rather see a decisive model buil
 ## Coverage discipline
 
 100% branch coverage is enforced from commit #1 via `addopts` in `pyproject.toml`. Every commit must pass `make test`. Excluded from coverage: `alembic/versions/**`, `alembic/env.py`, `__main__` shims, anything marked `# pragma: no cover` (with an inline comment justifying why).
+
+## Test conventions
+
+- **Use the `db` fixture from `tests/conftest.py`** for anything that touches the DB. It provides SAVEPOINT-isolated per-test sessions; inner `db.commit()` is safe.
+- **Arrange / act / assert with one blank line between each** — see `tests/test_config.py` for the canonical shape.
+- **No docstring on trivial tests; docstring required when the test asserts a non-obvious invariant.** See `test_db_fixture_commit_inside_test_does_not_end_session` for the latter case.
+- **Bare `assert` (no `unittest.TestCase`).**
+- **For pydantic-settings tests, pass `_env_file=None`** to skip `.env` loading; the autouse `_isolate_settings_env` fixture handles env-var hygiene.
+
+## Anti-patterns — things an agent might inadvertently undo
+
+These are decisions already settled. If you find yourself about to do one of these, stop and re-read the relevant doc:
+
+- **Don't re-introduce `settings = get_settings()` at module scope.** It was dropped deliberately in `3a077bc` after code review. All callers use `get_settings()`; the lru_cache makes it singleton-equivalent without test-isolation pain.
+- **Don't bind Postgres to a fixed host port.** `docker-compose.yml` uses `ports: ["5432"]` (dynamic) on purpose — the user already runs another Postgres on host 5432. `make up` writes the actual port into `.env`. Don't hard-code `localhost:5432` anywhere outside `.env.example`.
+- **Don't "fix" `tests/test_db.py` to use the `lab_test` database.** It deliberately uses the dev `lab` engine (read-only `SELECT 1`). See Enhancement G in `docs/future-enhancements.md`.
+- **Don't add tests that test SQLAlchemy/library contracts.** The trimmed isolation-pair tests (`abc5afd`) were testing SAVEPOINT rollback behavior — that's SQLAlchemy's job, not ours. Test our code, not our dependencies.
+- **Don't add `# pragma: no cover` without an inline comment** justifying why. The coverage gate is the design pressure; pragmas are escape hatches with an audit requirement.
+- **Don't swap out `pg_isready` polling in `make up` for `docker compose up -d --wait` yet.** Compose 2.17+ is required; user is on 2.15.1. Pending upgrade per Enhancement D.
