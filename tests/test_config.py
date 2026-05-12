@@ -1,6 +1,6 @@
 import pytest
 
-from lab.config import Settings
+from lab.config import Settings, get_settings
 
 
 def test_default_database_url():
@@ -33,3 +33,13 @@ def test_normalize_leaves_already_psycopg_unchanged():
     s = Settings(_env_file=None, DATABASE_URL="postgresql+psycopg://u:p@h:5432/x")
 
     assert s.DATABASE_URL == "postgresql+psycopg://u:p@h:5432/x"
+
+
+def test_get_settings_returns_cached_singleton():
+    get_settings.cache_clear()
+
+    first = get_settings()
+    second = get_settings()
+
+    assert isinstance(first, Settings)
+    assert first is second
