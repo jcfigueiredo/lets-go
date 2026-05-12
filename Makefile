@@ -51,3 +51,27 @@ migrate-down: ## Downgrade N revisions; usage: make migrate-down N=1
 migrate-test: ## Apply migrations to the lab_test database (used by pytest setup)
 	@docker compose exec -T postgres psql -U postgres -d postgres -c "CREATE DATABASE lab_test;" 2>/dev/null || true
 	@set -a; . ./.env; set +a; DATABASE_URL="$$TEST_DATABASE_URL" uv run alembic upgrade head
+
+.PHONY: seed start test-one coverage lint format
+
+seed: ## Apply seed data to the lab database
+	uv run python -m lab.seed
+
+start: ## One-command bootstrap: up + migrate + seed
+	$(MAKE) up
+	$(MAKE) migrate
+	$(MAKE) seed
+
+test-one: ## Run a single test path; usage: make test-one T=tests/test_foo.py::test_bar
+	@test -n "$(T)" || (echo "Usage: make test-one T=tests/path::test_name"; exit 1)
+	uv run pytest $(T) -v
+
+coverage: ## Run pytest and open the HTML coverage report
+	uv run pytest --cov-report=html
+	@command -v open >/dev/null 2>&1 && open htmlcov/index.html || echo "Open htmlcov/index.html manually"
+
+lint: ## Lint with ruff
+	uv run ruff check .
+
+format: ## Format with ruff
+	uv run ruff format .
