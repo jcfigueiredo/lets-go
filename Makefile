@@ -34,3 +34,20 @@ db-shell: ## Open psql against the lab database
 clean: ## Stop and remove the Postgres volume (DESTRUCTIVE — asks first)
 	@read -p "This will destroy the lab Postgres volume. Continue? [y/N] " ans && [ "$$ans" = "y" ] || exit 1
 	docker compose down -v
+
+.PHONY: migrate migration migrate-down migrate-test
+
+migrate: ## Apply pending migrations to the lab database
+	uv run alembic upgrade head
+
+migration: ## Generate a new migration revision; usage: make migration m="describe change"
+	@test -n "$(m)" || (echo "Usage: make migration m=\"description\""; exit 1)
+	uv run alembic revision --autogenerate -m "$(m)"
+
+migrate-down: ## Downgrade N revisions; usage: make migrate-down N=1
+	@test -n "$(N)" || (echo "Usage: make migrate-down N=1"; exit 1)
+	uv run alembic downgrade -$(N)
+
+migrate-test: ## Apply migrations to the lab_test database (used by pytest setup)
+	@docker compose exec -T postgres psql -U postgres -d postgres -c "CREATE DATABASE lab_test;" 2>/dev/null || true
+	@set -a; . ./.env; set +a; DATABASE_URL="$$TEST_DATABASE_URL" uv run alembic upgrade head
