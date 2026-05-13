@@ -9,13 +9,15 @@ a UNIQUE constraint on the seed anchor (e.g. ``projects.title``), use a
 check-then-insert pattern.
 """
 
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 
 from sqlalchemy.dialects.postgresql import insert
 from sqlmodel import Session, select
 
 from lab.db import engine
 from lab.models import (
+    Experiment,
+    ExperimentStatus,
     Project,
     ProjectResearcher,
     ProjectStatus,
@@ -98,12 +100,82 @@ def _seed_samples(session: Session) -> None:
     session.execute(stmt)
 
 
+def _seed_experiments(session: Session) -> None:
+    """Three experiments — one of them follows up another.
+
+    Satisfies the spec scenario "experiments that reference earlier experiments":
+    the follow-up OGTT replication references the baseline OGTT.
+
+    Idempotent via check-then-insert on (project_id, title), since there is no
+    UNIQUE constraint. ``follows_up_experiment_id`` is set after the baseline
+    experiment exists in the session.
+    """
+    session.flush()  # ensure projects have IDs
+
+    glucose = session.exec(select(Project).where(Project.title == "Glucose Tolerance Study")).one()
+    soil = session.exec(select(Project).where(Project.title == "Soil Microbiome Survey")).one()
+
+    # Phase 1: experiments with no follow-up reference.
+    phase_1 = [
+        {
+            "project_id": glucose.id,
+            "title": "Baseline OGTT",
+            "hypothesis": "Baseline response distribution.",
+            "start_date": date(2026, 1, 20),
+            "end_date": date(2026, 1, 25),
+            "status": ExperimentStatus.COMPLETED,
+        },
+        {
+            "project_id": soil.id,
+            "title": "Watershed A 16S",
+            "hypothesis": "Diverse microbial communities.",
+            "start_date": date(2026, 3, 5),
+            "end_date": None,
+            "status": ExperimentStatus.RUNNING,
+        },
+    ]
+    for row in phase_1:
+        existing = session.exec(
+            select(Experiment).where(
+                Experiment.project_id == row["project_id"],
+                Experiment.title == row["title"],
+            )
+        ).first()
+        if existing is None:
+            session.add(Experiment(**row))
+    session.flush()
+
+    # Phase 2: follow-up references baseline. The flush above guarantees the
+    # baseline row has an ID before we wire the FK.
+    baseline = session.exec(
+        select(Experiment).where(Experiment.title == "Baseline OGTT")
+    ).one()
+    follow_up = {
+        "project_id": glucose.id,
+        "title": "Follow-up OGTT replication",
+        "hypothesis": "Replication of baseline distribution with stricter protocol.",
+        "start_date": date(2026, 2, 15),
+        "end_date": None,
+        "status": ExperimentStatus.RUNNING,
+        "follows_up_experiment_id": baseline.id,
+    }
+    existing = session.exec(
+        select(Experiment).where(
+            Experiment.project_id == follow_up["project_id"],
+            Experiment.title == follow_up["title"],
+        )
+    ).first()
+    if existing is None:
+        session.add(Experiment(**follow_up))
+
+
 def seed(session: Session) -> None:
     """Apply seed data idempotently."""
     _seed_researchers(session)
     _seed_projects(session)
     _seed_memberships(session)
     _seed_samples(session)
+    _seed_experiments(session)
 
 
 if __name__ == "__main__":  # pragma: no cover

@@ -12,11 +12,13 @@ To add a factory for a new aggregate:
 
 from types import SimpleNamespace
 
+from tests.factories.experiment import ExperimentFactory
 from tests.factories.project import ProjectFactory
 from tests.factories.researcher import ResearcherFactory
 from tests.factories.sample import SampleFactory
 
 ALL_FACTORIES: list[type] = [
+    ExperimentFactory,
     ProjectFactory,
     ResearcherFactory,
     SampleFactory,
@@ -26,6 +28,7 @@ ALL_FACTORIES: list[type] = [
 def factory_namespace() -> SimpleNamespace:
     """Return a namespace exposing each factory by snake-case name."""
     return SimpleNamespace(
+        experiment=ExperimentFactory,
         project=ProjectFactory,
         researcher=ResearcherFactory,
         sample=SampleFactory,
