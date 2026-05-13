@@ -17,6 +17,7 @@ from sqlmodel import Session, select
 from lab.db import engine
 from lab.models import (
     Experiment,
+    ExperimentSample,
     ExperimentStatus,
     Project,
     ProjectResearcher,
@@ -169,6 +170,41 @@ def _seed_experiments(session: Session) -> None:
         session.add(Experiment(**follow_up))
 
 
+def _seed_experiment_samples(session: Session) -> None:
+    """Assign samples to experiments. Sample GTS-001 is used in both the baseline
+    and follow-up OGTT experiments — satisfies the spec scenario "samples used
+    across multiple experiments".
+
+    Idempotent via ``INSERT … ON CONFLICT DO NOTHING`` anchored on the composite PK.
+    """
+    session.flush()
+
+    baseline = session.exec(
+        select(Experiment).where(Experiment.title == "Baseline OGTT")
+    ).one()
+    follow_up = session.exec(
+        select(Experiment).where(Experiment.title == "Follow-up OGTT replication")
+    ).one()
+    watershed = session.exec(
+        select(Experiment).where(Experiment.title == "Watershed A 16S")
+    ).one()
+
+    gts1 = session.exec(select(Sample).where(Sample.accession_code == "GTS-001")).one()
+    gts2 = session.exec(select(Sample).where(Sample.accession_code == "GTS-002")).one()
+    sms1 = session.exec(select(Sample).where(Sample.accession_code == "SMS-001")).one()
+
+    rows = [
+        {"experiment_id": baseline.id,  "sample_id": gts1.id},
+        {"experiment_id": baseline.id,  "sample_id": gts2.id},
+        {"experiment_id": follow_up.id, "sample_id": gts1.id},  # GTS-001 reused
+        {"experiment_id": watershed.id, "sample_id": sms1.id},
+    ]
+    stmt = insert(ExperimentSample).values(rows).on_conflict_do_nothing(
+        index_elements=["experiment_id", "sample_id"]
+    )
+    session.execute(stmt)
+
+
 def seed(session: Session) -> None:
     """Apply seed data idempotently."""
     _seed_researchers(session)
@@ -176,6 +212,7 @@ def seed(session: Session) -> None:
     _seed_memberships(session)
     _seed_samples(session)
     _seed_experiments(session)
+    _seed_experiment_samples(session)
 
 
 if __name__ == "__main__":  # pragma: no cover

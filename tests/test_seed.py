@@ -1,6 +1,6 @@
 from sqlmodel import Session, select, func
 
-from lab.models import Experiment, Project, ProjectResearcher, Researcher, Sample
+from lab.models import Experiment, ExperimentSample, Project, ProjectResearcher, Researcher, Sample
 from lab.seed import seed
 
 
@@ -61,6 +61,26 @@ def test_seed_satisfies_multi_researcher_scenario(db: Session):
     assert any(count >= 2 for _, count in counts)
 
 
+def test_seed_creates_experiment_samples(db: Session):
+    seed(db)
+    db.flush()
+
+    count = db.exec(select(func.count()).select_from(ExperimentSample)).one()
+    assert count == 4
+
+
+def test_seed_satisfies_cross_experiment_sample_scenario(db: Session):
+    """Spec scenario: samples used across multiple experiments."""
+    seed(db)
+    db.flush()
+
+    counts = db.exec(
+        select(ExperimentSample.sample_id, func.count())
+        .group_by(ExperimentSample.sample_id)
+    ).all()
+    assert any(count >= 2 for _, count in counts)
+
+
 def test_seed_satisfies_follow_up_scenario(db: Session):
     """Spec scenario: experiments that reference earlier experiments."""
     seed(db)
@@ -86,6 +106,7 @@ def test_seed_is_idempotent(db: Session):
     m1 = db.exec(select(func.count()).select_from(ProjectResearcher)).one()
     s1 = db.exec(select(func.count()).select_from(Sample)).one()
     e1 = db.exec(select(func.count()).select_from(Experiment)).one()
+    es1 = db.exec(select(func.count()).select_from(ExperimentSample)).one()
 
     # Mutate one of each kind; if seed accidentally upserts, mutations revert.
     alice = db.exec(select(Researcher).where(Researcher.email == "alice@lab.example")).one()
@@ -110,6 +131,7 @@ def test_seed_is_idempotent(db: Session):
     m2 = db.exec(select(func.count()).select_from(ProjectResearcher)).one()
     s2 = db.exec(select(func.count()).select_from(Sample)).one()
     e2 = db.exec(select(func.count()).select_from(Experiment)).one()
+    es2 = db.exec(select(func.count()).select_from(ExperimentSample)).one()
     alice_after = db.exec(select(Researcher).where(Researcher.email == "alice@lab.example")).one()
     glucose_after = db.exec(select(Project).where(Project.title == "Glucose Tolerance Study")).one()
     alice_glucose_after = db.exec(
@@ -119,7 +141,7 @@ def test_seed_is_idempotent(db: Session):
         )
     ).one()
 
-    assert (r1, p1, m1, s1, e1) == (r2, p2, m2, s2, e2) == (4, 2, 4, 3, 3)
+    assert (r1, p1, m1, s1, e1, es1) == (r2, p2, m2, s2, e2, es2) == (4, 2, 4, 3, 3, 4)
     assert alice_after.name == "Alice Tan (renamed)", "Seed must not overwrite existing researchers"
     assert glucose_after.description == "Mutated description", "Seed must not overwrite existing projects"
     assert alice_glucose_after.joined_at == alice_glucose_joined_at, (

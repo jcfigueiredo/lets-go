@@ -8,6 +8,7 @@ registered before autogenerate runs.
 from sqlmodel import SQLModel
 
 from lab.models.experiment import Experiment, ExperimentStatus
+from lab.models.experiment_sample import ExperimentSample
 from lab.models.project import Project, ProjectStatus
 from lab.models.project_researcher import ProjectResearcher
 from lab.models.researcher import Researcher, ResearcherRole
@@ -17,6 +18,7 @@ __all__ = [
     "SQLModel",
     "Experiment",
     "ExperimentStatus",
+    "ExperimentSample",
     "Project",
     "ProjectStatus",
     "ProjectResearcher",
