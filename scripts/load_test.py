@@ -12,8 +12,14 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import os
+import subprocess
 import sys
 from dataclasses import dataclass
+
+import psycopg
+
+from lab.config import get_settings
 
 
 @dataclass(frozen=True)
@@ -53,6 +59,51 @@ def plan_for(rows: int) -> Plan:
     )
 
 
+def load_database_url() -> str:
+    """Derive the lab_load DB URL from the dev DATABASE_URL by swapping the db name."""
+    dev_url = get_settings().DATABASE_URL
+    base, _ = dev_url.rsplit("/", 1)
+    return f"{base}/lab_load"
+
+
+def _admin_url() -> str:
+    """URL pointing at the system 'postgres' database for CREATE DATABASE.
+
+    Strips the SQLAlchemy ``+psycopg`` dialect marker — psycopg's libpq
+    parser only understands plain ``postgresql://`` URIs.
+    """
+    dev_url = get_settings().DATABASE_URL
+    base, _ = dev_url.rsplit("/", 1)
+    base = base.replace("postgresql+psycopg://", "postgresql://", 1)
+    return f"{base}/postgres"
+
+
+def ensure_lab_load_database() -> None:
+    """``CREATE DATABASE lab_load`` if it doesn't exist. Idempotent."""
+    with psycopg.connect(_admin_url(), autocommit=True) as conn:
+        try:
+            conn.execute("CREATE DATABASE lab_load")
+        except psycopg.errors.DuplicateDatabase:
+            pass
+
+
+def migrate(load_url: str) -> None:
+    """Run alembic migrations against the load DB via subprocess.
+
+    Subprocess reuses the existing alembic infrastructure (the Makefile's
+    ``migrate-test`` target does the same dance). Avoids embedding alembic's
+    Python API in the script.
+    """
+    env = {**os.environ, "DATABASE_URL": load_url}
+    subprocess.run(
+        ["uv", "run", "alembic", "upgrade", "head"],
+        env=env,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         prog="load_test",
@@ -67,14 +118,16 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     plan = plan_for(args.rows)
-    print(f"load_test plan for N={plan.rows:,}:")
-    print(f"  researchers:        {plan.researchers:>10,}")
-    print(f"  projects:           {plan.projects:>10,}")
-    print(f"  memberships:        {plan.memberships:>10,}")
-    print(f"  samples:            {plan.samples:>10,}")
-    print(f"  experiments:        {plan.experiments:>10,}")
-    print(f"  experiment_samples: {plan.experiment_samples:>10,}")
-    print(f"  measurements:       {plan.measurements:>10,}")
+    print(f"load_test: target N={plan.rows:,} measurements")
+
+    print("load_test: ensuring lab_load database exists...")
+    ensure_lab_load_database()
+
+    load_url = load_database_url()
+    print(f"load_test: applying migrations to {load_url}...")
+    migrate(load_url)
+
+    print("load_test: ready (no rows loaded yet — that lands in Task 5)")
     return 0
 
 
