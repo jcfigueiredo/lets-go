@@ -291,6 +291,25 @@ def bulk_load(conn: psycopg.Connection, plan: Plan) -> None:
             ))
 
 
+def analyze_all(conn: psycopg.Connection) -> None:
+    """Run ANALYZE on every loaded table.
+
+    Critical for accurate EXPLAIN output. Without this the planner thinks
+    the tables are still empty (last seen post-TRUNCATE) and won't choose
+    indexes.
+    """
+    for table in (
+        "researchers",
+        "projects",
+        "project_researchers",
+        "samples",
+        "experiments",
+        "experiment_samples",
+        "measurements",
+    ):
+        conn.execute(f"ANALYZE {table}")
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         prog="load_test",
@@ -321,8 +340,16 @@ def main(argv: list[str] | None = None) -> int:
         bulk_load(conn, plan)
         conn.commit()
         load_elapsed = time.monotonic() - t0
+
+        print("load_test: analyzing tables for planner statistics...")
+        t0 = time.monotonic()
+        analyze_all(conn)
+        conn.commit()
+        analyze_elapsed = time.monotonic() - t0
+
     rate = plan.measurements / load_elapsed if load_elapsed > 0 else float("inf")
     print(f"load_test: loaded in {load_elapsed:.1f}s ({rate:,.0f} measurements/sec)")
+    print(f"load_test: analyzed in {analyze_elapsed:.2f}s")
 
     return 0
 
