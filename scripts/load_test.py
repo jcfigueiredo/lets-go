@@ -66,16 +66,24 @@ def load_database_url() -> str:
     return f"{base}/lab_load"
 
 
+def _psycopg_url(url: str) -> str:
+    """Strip the SQLAlchemy ``+psycopg`` dialect marker for libpq's URI parser.
+
+    SQLAlchemy URLs (e.g. ``postgresql+psycopg://...``) carry a dialect marker
+    that libpq doesn't recognize. ``psycopg.connect()`` parses URLs via libpq,
+    so we strip the marker before handing the URL to psycopg directly.
+    """
+    return url.replace("postgresql+psycopg://", "postgresql://", 1)
+
+
 def _admin_url() -> str:
     """URL pointing at the system 'postgres' database for CREATE DATABASE.
 
-    Strips the SQLAlchemy ``+psycopg`` dialect marker — psycopg's libpq
-    parser only understands plain ``postgresql://`` URIs.
+    Strips the SQLAlchemy ``+psycopg`` dialect marker for libpq.
     """
     dev_url = get_settings().DATABASE_URL
     base, _ = dev_url.rsplit("/", 1)
-    base = base.replace("postgresql+psycopg://", "postgresql://", 1)
-    return f"{base}/postgres"
+    return _psycopg_url(f"{base}/postgres")
 
 
 def ensure_lab_load_database() -> None:
@@ -104,6 +112,24 @@ def migrate(load_url: str) -> None:
     )
 
 
+def truncate_all(conn: psycopg.Connection) -> None:
+    """Empty every data table; reset id sequences.
+
+    ``CASCADE`` handles the FK chain in one statement. ``RESTART IDENTITY``
+    resets the bigserial sequences so loaded data starts at id=1.
+    """
+    conn.execute("""
+        TRUNCATE measurements,
+                 experiment_samples,
+                 experiments,
+                 samples,
+                 project_researchers,
+                 projects,
+                 researchers
+        RESTART IDENTITY CASCADE
+    """)
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         prog="load_test",
@@ -127,7 +153,12 @@ def main(argv: list[str] | None = None) -> int:
     print(f"load_test: applying migrations to {load_url}...")
     migrate(load_url)
 
-    print("load_test: ready (no rows loaded yet — that lands in Task 5)")
+    print("load_test: truncating data tables...")
+    with psycopg.connect(_psycopg_url(load_url)) as conn:
+        truncate_all(conn)
+        conn.commit()
+    print("load_test: tables truncated")
+
     return 0
 
 
