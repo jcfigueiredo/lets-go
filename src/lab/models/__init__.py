@@ -1,11 +1,12 @@
 """Aggregate root re-exports.
 
-This module is the single import point for ``SQLModel.metadata`` discovery,
-used by Alembic's ``env.py`` (Task 6). As aggregates land with the schema
-design, import them here so their table metadata is registered before
-autogenerate runs.
+Single import point for ``SQLModel.metadata`` discovery, used by Alembic's
+``env.py``. Every new aggregate is imported here so its table metadata is
+registered before autogenerate runs.
 """
 
 from sqlmodel import SQLModel
 
-__all__ = ["SQLModel"]
+from lab.models.researcher import Researcher, ResearcherRole
+
+__all__ = ["SQLModel", "Researcher", "ResearcherRole"]
