@@ -5,7 +5,9 @@ laboratory experiment tracking system. The deliverable is the schema +
 seed data + this README; see [`lab-experiment-tracking-system.md`](./lab-experiment-tracking-system.md)
 for the full brief.
 
-> **Status:** Schema complete. All four spec-required seed scenarios exercised end-to-end in `tests/test_seed_scenarios.py`. 100% branch coverage maintained throughout.
+> **Status:** Schema complete. All four spec-required seed scenarios exercised
+> end-to-end in [`tests/test_seed_scenarios.py`](./tests/test_seed_scenarios.py).
+> 100% branch coverage maintained throughout.
 
 ## Quick start
 
@@ -31,13 +33,93 @@ every time `make up` runs.
 - [`uv`](https://docs.astral.sh/uv/) (Python package manager)
 - Python 3.11+ (resolved by `uv` from `.python-version`)
 
+## Schema at a glance
+
+7 tables (5 aggregates + 2 m:n joins), 4 Postgres enums. Full legend and
+constraint notes in [`docs/schema.md`](./docs/schema.md).
+
+```mermaid
+erDiagram
+    researchers {
+        bigint id PK
+        text name
+        text email UK
+        researcher_role role
+    }
+    projects {
+        bigint id PK
+        text title
+        text description
+        project_status status
+    }
+    project_researchers {
+        bigint project_id PK,FK
+        bigint researcher_id PK,FK
+        timestamptz joined_at
+    }
+    samples {
+        bigint id PK
+        text accession_code UK
+        text specimen_type
+        timestamptz collected_at
+        text storage_location
+    }
+    experiments {
+        bigint id PK
+        bigint project_id FK
+        text title
+        text hypothesis
+        date start_date
+        date end_date
+        experiment_status status
+        bigint follows_up_experiment_id FK "self-ref, nullable"
+    }
+    experiment_samples {
+        bigint experiment_id PK,FK
+        bigint sample_id PK,FK
+        timestamptz assigned_at
+    }
+    measurements {
+        bigint id PK
+        bigint experiment_id FK
+        bigint sample_id FK "nullable"
+        bigint recorded_by FK
+        timestamptz recorded_at
+        measurement_kind kind
+        numeric numeric_value
+        text unit
+        text categorical_value
+        text text_value
+    }
+
+    researchers       ||--o{ project_researchers : ""
+    projects          ||--o{ project_researchers : ""
+    projects          ||--o{ experiments         : ""
+    experiments       ||--o{ experiment_samples  : ""
+    samples           ||--o{ experiment_samples  : ""
+    experiments       }o--o| experiments         : "follows-up"
+    experiments       ||--o{ measurements        : ""
+    samples           |o--o{ measurements        : ""
+    researchers       ||--o{ measurements        : "recorded by"
+```
+
+Headline invariants visible above:
+
+- All FKs are `ON DELETE RESTRICT` — labs archive, they don't delete.
+- `measurements` is polymorphic via STI; a CHECK constraint
+  (`measurement_value_matches_kind`) enforces that exactly one kind's
+  value columns are populated per row. Load-bearing invariant of the design.
+- `experiments.follows_up_experiment_id` is a self-FK for replication /
+  iteration chains; a single-row CHECK prevents self-reference, but
+  multi-row cycles (A→B→A) are a domain-service concern.
+
 ## What's here
 
 ```
 .
 ├── docker-compose.yml         # postgres:16-alpine, dynamic host port
 ├── Makefile                   # `make help` lists everything
-├── alembic/versions/          # 7 migrations: one per aggregate
+├── alembic/versions/          # 8 migrations
 ├── src/lab/
 │   ├── config.py              # pydantic-settings (DATABASE_URL et al.)
 │   ├── db.py                  # SQLAlchemy 2.x sync engine
@@ -53,6 +135,7 @@ every time `make up` runs.
 │   ├── test_seed_scenarios.py # end-to-end spec scenarios
 │   └── test_queries.py        # representative read paths (interview ammo)
 └── docs/
+    ├── schema.md              # full ER diagram + constraint notes
     ├── superpowers/specs/     # design docs (infra + schema)
     ├── superpowers/plans/     # implementation plans
     └── future-enhancements.md # things deliberately not built
@@ -84,53 +167,6 @@ make coverage       # opens htmlcov/index.html
 The coverage gate is enforced commit-by-commit via `pyproject.toml`
 addopts (`--cov-branch --cov-fail-under=100`). A change that drops
 coverage cannot land.
-
-## Assumptions (infra-level)
-
-- Python 3.11+ is acceptable (CI/host).
-- Reviewers run `make start` once and don't need the test database
-  pre-created — `make migrate-test` handles it lazily.
-- Postgres 16 specifically. No effort spent on cross-version compatibility.
-- Host port for Postgres is **not** fixed to 5432. Docker assigns an
-  ephemeral host port to avoid collisions with other local Postgres
-  instances; the Makefile writes `.env` with the actual port. Reviewers
-  on a clean machine will see a different port on every `make up` and
-  this is intentional.
-- `tests/test_db.py` connects to the dev `lab` database (not `lab_test`).
-  The query is a read-only `SELECT 1`, so this is harmless — but `make
-  test` requires `make up` to have populated `.env` with a live host
-  port. `make start` covers both. See Enhancement G in
-  `docs/future-enhancements.md`.
-
-## Tradeoffs (infra-level)
-
-- **Two schema representations.** Models in `src/lab/models/` are
-  source-of-truth for *changes*; generated Alembic migrations in
-  `alembic/versions/` are source-of-truth for *what's deployed*.
-  Reviewers should read the migrations as the deliverable; the models
-  are the authoring tool.
-- **Sync, not async.** No HTTP layer to demand async. Captured as
-  Enhancement B in `docs/future-enhancements.md`.
-- **100% branch coverage as a build gate.** The cost is that every
-  conditional in `db.py`/`config.py`/`seed.py` must be covered. The
-  benefit is design pressure — untested branches become a design
-  problem to solve, not a TODO to defer.
-- **No FastAPI / HTTP surface.** Considered and explicitly chose not to.
-  The spec asks for a data model; adding an API would be vanity work
-  here. Roughly an hour to add if needed — see Enhancement A.
-- **`pg_isready` polyfill instead of `docker compose up -d --wait`.**
-  The user's installed Docker Compose (2.15.1) doesn't support `--wait`.
-  Polyfill is a temporary measure; see Enhancement D.
-
-## Open questions (infra-level)
-
-- Should CI gate down-migrations too, or accept "rollback is a runbook
-  step" as the SLA?
-- Should `make start` also run `make test` to give reviewers a one-shot
-  "is everything healthy" signal, or is the current bootstrap-only
-  semantics cleaner?
-- Should `make coverage` depend on `migrate-test` for self-sufficiency,
-  or is the current "run after `make test`" implicit ordering acceptable?
 
 ## Schema-level assumptions
 
@@ -167,3 +203,58 @@ coverage cannot land.
 ## Future enhancements
 
 See [`docs/future-enhancements.md`](./docs/future-enhancements.md).
+
+---
+
+## Appendix — infra-level notes
+
+The remaining sections describe the project's plumbing — useful context for
+evaluating *how* the schema was built, but secondary to the data-model
+deliverable above.
+
+### Assumptions (infra-level)
+
+- Python 3.11+ is acceptable (CI/host).
+- Reviewers run `make start` once and don't need the test database
+  pre-created — `make migrate-test` handles it lazily.
+- Postgres 16 specifically. No effort spent on cross-version compatibility.
+- Host port for Postgres is **not** fixed to 5432. Docker assigns an
+  ephemeral host port to avoid collisions with other local Postgres
+  instances; the Makefile writes `.env` with the actual port. Reviewers
+  on a clean machine will see a different port on every `make up` and
+  this is intentional.
+- `tests/test_db.py` connects to the dev `lab` database (not `lab_test`).
+  The query is a read-only `SELECT 1`, so this is harmless — but `make
+  test` requires `make up` to have populated `.env` with a live host
+  port. `make start` covers both. See Enhancement G in
+  `docs/future-enhancements.md`.
+
+### Tradeoffs (infra-level)
+
+- **Two schema representations.** Models in `src/lab/models/` are
+  source-of-truth for *changes*; generated Alembic migrations in
+  `alembic/versions/` are source-of-truth for *what's deployed*.
+  Reviewers should read the migrations as the deliverable; the models
+  are the authoring tool.
+- **Sync, not async.** No HTTP layer to demand async. Captured as
+  Enhancement B in `docs/future-enhancements.md`.
+- **100% branch coverage as a build gate.** The cost is that every
+  conditional in `db.py`/`config.py`/`seed.py` must be covered. The
+  benefit is design pressure — untested branches become a design
+  problem to solve, not a TODO to defer.
+- **No FastAPI / HTTP surface.** Considered and explicitly chose not to.
+  The spec asks for a data model; adding an API would be vanity work
+  here. Roughly an hour to add if needed — see Enhancement A.
+- **`pg_isready` polyfill instead of `docker compose up -d --wait`.**
+  The user's installed Docker Compose (2.15.1) doesn't support `--wait`.
+  Polyfill is a temporary measure; see Enhancement D.
+
+### Open questions (infra-level)
+
+- Should CI gate down-migrations too, or accept "rollback is a runbook
+  step" as the SLA?
+- Should `make start` also run `make test` to give reviewers a one-shot
+  "is everything healthy" signal, or is the current bootstrap-only
+  semantics cleaner?
+- Should `make coverage` depend on `migrate-test` for self-sufficiency,
+  or is the current "run after `make test`" implicit ordering acceptable?
