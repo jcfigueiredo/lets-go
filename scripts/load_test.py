@@ -310,6 +310,201 @@ def analyze_all(conn: psycopg.Connection) -> None:
         conn.execute(f"ANALYZE {table}")
 
 
+@dataclass(frozen=True)
+class BenchmarkQuery:
+    """One row of the benchmark report.
+
+    ``expected_index`` is the name of the index the planner SHOULD use.
+    ``forbid_sort`` is True for query 7 where the composite index should
+    satisfy ORDER BY without a Sort node.
+    """
+
+    label: str
+    sql: str
+    params_picker: str  # name of the helper function that produces params
+    expected_index: str
+    forbid_sort: bool = False
+
+
+BENCHMARK_QUERIES: tuple[BenchmarkQuery, ...] = (
+    BenchmarkQuery(
+        label="Lookup researcher by email",
+        sql="SELECT * FROM researchers WHERE email = %s",
+        params_picker="first_researcher_email",
+        expected_index="uq_researchers_email",
+    ),
+    BenchmarkQuery(
+        label="Lookup sample by accession code",
+        sql="SELECT * FROM samples WHERE accession_code = %s",
+        params_picker="first_sample_accession",
+        expected_index="uq_samples_accession_code",
+    ),
+    BenchmarkQuery(
+        label="Projects a researcher participates in",
+        sql=(
+            "SELECT p.title FROM projects p "
+            "JOIN project_researchers pr ON pr.project_id = p.id "
+            "WHERE pr.researcher_id = %s"
+        ),
+        params_picker="first_researcher_id",
+        expected_index="ix_project_researchers_researcher_id",
+    ),
+    BenchmarkQuery(
+        label="Experiments in a project",
+        sql="SELECT * FROM experiments WHERE project_id = %s",
+        params_picker="first_project_id",
+        expected_index="ix_experiments_project_id",
+    ),
+    BenchmarkQuery(
+        label="Follow-ups of a specific experiment",
+        sql="SELECT * FROM experiments WHERE follows_up_experiment_id = %s",
+        params_picker="parent_experiment_id",
+        expected_index="ix_experiments_follows_up_experiment_id",
+    ),
+    BenchmarkQuery(
+        label="Experiments that used a sample",
+        sql=(
+            "SELECT e.title FROM experiments e "
+            "JOIN experiment_samples es ON es.experiment_id = e.id "
+            "WHERE es.sample_id = %s"
+        ),
+        params_picker="first_sample_id",
+        expected_index="ix_experiment_samples_sample_id",
+    ),
+    BenchmarkQuery(
+        label="Recent measurements for an experiment (filter + order)",
+        sql=(
+            "SELECT * FROM measurements "
+            "WHERE experiment_id = %s "
+            "ORDER BY recorded_at DESC LIMIT 100"
+        ),
+        params_picker="first_experiment_id",
+        expected_index="ix_measurements_experiment_id_recorded_at",
+        forbid_sort=True,
+    ),
+    BenchmarkQuery(
+        label="Count measurements by sample",
+        sql="SELECT count(*) FROM measurements WHERE sample_id = %s",
+        params_picker="first_sample_id",
+        expected_index="ix_measurements_sample_id",
+    ),
+    BenchmarkQuery(
+        label="Count measurements by recorder",
+        sql="SELECT count(*) FROM measurements WHERE recorded_by = %s",
+        params_picker="first_researcher_id",
+        expected_index="ix_measurements_recorded_by",
+    ),
+    BenchmarkQuery(
+        label="High numeric readings in mg/dL",
+        sql=(
+            "SELECT count(*) FROM measurements "
+            "WHERE kind = 'numeric' AND unit = 'mg/dL' AND numeric_value > 100"
+        ),
+        params_picker="no_params",
+        expected_index="ix_measurements_kind",
+    ),
+)
+
+
+def _first_id(conn: psycopg.Connection, table: str) -> int:
+    return conn.execute(f"SELECT id FROM {table} ORDER BY id LIMIT 1").fetchone()[0]
+
+
+def _pick_params(conn: psycopg.Connection, picker: str) -> tuple:
+    """Return a single-tuple params bundle for the named picker."""
+    if picker == "first_researcher_email":
+        email = conn.execute(
+            "SELECT email FROM researchers ORDER BY id LIMIT 1"
+        ).fetchone()[0]
+        return (email,)
+    if picker == "first_sample_accession":
+        code = conn.execute(
+            "SELECT accession_code FROM samples ORDER BY id LIMIT 1"
+        ).fetchone()[0]
+        return (code,)
+    if picker == "first_researcher_id":
+        return (_first_id(conn, "researchers"),)
+    if picker == "first_project_id":
+        return (_first_id(conn, "projects"),)
+    if picker == "first_sample_id":
+        return (_first_id(conn, "samples"),)
+    if picker == "first_experiment_id":
+        return (_first_id(conn, "experiments"),)
+    if picker == "parent_experiment_id":
+        # An experiment that IS referenced as someone's follows_up_experiment_id
+        row = conn.execute(
+            "SELECT follows_up_experiment_id FROM experiments "
+            "WHERE follows_up_experiment_id IS NOT NULL LIMIT 1"
+        ).fetchone()
+        if row is None:
+            raise RuntimeError("no follow-up experiments in load data — expected ~10%")
+        return (row[0],)
+    if picker == "no_params":
+        return ()
+    raise ValueError(f"unknown picker: {picker}")
+
+
+@dataclass(frozen=True)
+class QueryResult:
+    label: str
+    sql: str
+    expected_index: str
+    used_index: str | None
+    has_sort_above: bool
+    execution_time_ms: float
+    plan_summary: str  # short one-line description, e.g. "Index Scan using uq_..."
+
+
+def _walk_plan(node: dict) -> tuple[str | None, bool, str]:
+    """Return (index_name, has_sort, summary) by walking the plan tree.
+
+    ``index_name`` is the deepest ``Index Name`` found in any descendant.
+    ``has_sort`` is True if any Sort node appears anywhere in the tree.
+    ``summary`` is a single-line description of the top node.
+    """
+    index_name: str | None = None
+    has_sort = False
+    summary = f"{node['Node Type']}"
+
+    def visit(n: dict) -> None:
+        nonlocal index_name, has_sort
+        if n["Node Type"] == "Sort":
+            has_sort = True
+        if "Index Name" in n and index_name is None:
+            index_name = n["Index Name"]
+        for child in n.get("Plans", []):
+            visit(child)
+
+    visit(node)
+    if index_name:
+        summary = f"{node['Node Type']} → uses {index_name}"
+    return index_name, has_sort, summary
+
+
+def run_benchmarks(conn: psycopg.Connection) -> list[QueryResult]:
+    """Execute EXPLAIN (FORMAT JSON, ANALYZE) on every benchmark query."""
+    results: list[QueryResult] = []
+    for q in BENCHMARK_QUERIES:
+        params = _pick_params(conn, q.params_picker)
+        plan_json = conn.execute(
+            f"EXPLAIN (FORMAT JSON, ANALYZE) {q.sql}", params
+        ).fetchone()[0][0]
+        top = plan_json["Plan"]
+        index_name, has_sort, summary = _walk_plan(top)
+        results.append(
+            QueryResult(
+                label=q.label,
+                sql=q.sql,
+                expected_index=q.expected_index,
+                used_index=index_name,
+                has_sort_above=has_sort,
+                execution_time_ms=plan_json["Execution Time"],
+                plan_summary=summary,
+            )
+        )
+    return results
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         prog="load_test",
@@ -347,9 +542,16 @@ def main(argv: list[str] | None = None) -> int:
         conn.commit()
         analyze_elapsed = time.monotonic() - t0
 
+        print("load_test: running benchmark queries...")
+        results = run_benchmarks(conn)
+
     rate = plan.measurements / load_elapsed if load_elapsed > 0 else float("inf")
     print(f"load_test: loaded in {load_elapsed:.1f}s ({rate:,.0f} measurements/sec)")
     print(f"load_test: analyzed in {analyze_elapsed:.2f}s")
+
+    for r in results:
+        verdict = "✓" if r.used_index == r.expected_index else "✗"
+        print(f"  {verdict} {r.label}: {r.plan_summary} ({r.execution_time_ms:.2f} ms)")
 
     return 0
 
