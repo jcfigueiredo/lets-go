@@ -69,3 +69,17 @@ def db(test_engine: Engine) -> Iterator[Session]:
         if outer.is_active:
             outer.rollback()
         connection.close()
+
+
+@pytest.fixture
+def factories(db: Session):
+    """Bind every registered factory to the per-test session and return a namespace.
+
+    Tests use ``factories.researcher()``, ``factories.project()``, etc.
+    """
+    from tests.factories import ALL_FACTORIES, factory_namespace
+
+    for cls in ALL_FACTORIES:
+        cls._meta.sqlalchemy_session = db
+
+    return factory_namespace()
