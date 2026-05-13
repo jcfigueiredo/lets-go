@@ -134,6 +134,8 @@ Headline invariants visible above:
 │   ├── test_seed.py           # seed contribution + idempotency
 │   ├── test_seed_scenarios.py # end-to-end spec scenarios
 │   └── test_queries.py        # representative read paths (interview ammo)
+├── scripts/
+│   └── load_test.py           # `make load` — schema validation under volume
 └── docs/
     ├── schema.md              # full ER diagram + constraint notes
     ├── superpowers/specs/     # design docs (infra + schema)
@@ -152,6 +154,7 @@ make migration m="…" # autogenerate a new revision
 make seed            # seed the lab database with demonstration data (idempotent)
 make test            # pytest (100% branch coverage enforced)
 make coverage        # pytest + open htmlcov/index.html
+make load            # schema validation under volume (default N=100k)
 make lint            # ruff check
 make format          # ruff format
 make db-shell        # psql into lab
@@ -167,6 +170,27 @@ make coverage       # opens htmlcov/index.html
 The coverage gate is enforced commit-by-commit via `pyproject.toml`
 addopts (`--cov-branch --cov-fail-under=100`). A change that drops
 coverage cannot land.
+
+## Load test
+
+`scripts/load_test.py` validates that each declared index is used by the
+planner under volume. It bulk-loads a separate `lab_load` database via
+Postgres `COPY`, runs `ANALYZE`, then issues `EXPLAIN (FORMAT JSON, ANALYZE)`
+against one query per non-PK index. Verdicts:
+
+- ✓ — planner chose the expected index
+- — — planner correctly skipped the index (table has < 1000 rows; seq scan is cheaper)
+- ✗ — planner chose something else (would indicate a real schema issue)
+
+```bash
+make load              # default N=100,000 measurements (~5s)
+make load N=1000000    # 1M for the live-demo headline (~30-60s)
+```
+
+At N=100,000: **4/10 ✓ + 6/10 —**, no ✗. The four ✓ are the measurements-table
+queries (large enough for indexes to dominate); the six — are correctly
+seq-scanned small parent tables (researchers, projects, experiments). Full
+design in [`docs/superpowers/specs/2026-05-13-load-test-design.md`](./docs/superpowers/specs/2026-05-13-load-test-design.md).
 
 ## Schema-level assumptions
 
