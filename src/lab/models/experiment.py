@@ -18,9 +18,11 @@ from sqlalchemy import (
     CheckConstraint,
     Column,
     DateTime,
-    Enum as SAEnum,
     ForeignKey,
     func,
+)
+from sqlalchemy import (
+    Enum as SAEnum,
 )
 from sqlmodel import Field, SQLModel
 

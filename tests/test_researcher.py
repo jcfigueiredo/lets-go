@@ -6,7 +6,7 @@ from lab.models import Researcher, ResearcherRole
 
 
 def test_create_and_read(db: Session, factories):
-    alice = factories.researcher(name="Alice", email="alice@lab.example")
+    factories.researcher(name="Alice", email="alice@lab.example")
     db.flush()
 
     found = db.exec(select(Researcher).where(Researcher.email == "alice@lab.example")).one()

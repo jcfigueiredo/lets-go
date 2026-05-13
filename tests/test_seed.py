@@ -1,4 +1,4 @@
-from sqlmodel import Session, select, func
+from sqlmodel import Session, func, select
 
 from lab.models import (
     Experiment,
@@ -63,8 +63,7 @@ def test_seed_satisfies_multi_researcher_scenario(db: Session):
     db.flush()
 
     counts = db.exec(
-        select(ProjectResearcher.project_id, func.count())
-        .group_by(ProjectResearcher.project_id)
+        select(ProjectResearcher.project_id, func.count()).group_by(ProjectResearcher.project_id)
     ).all()
     assert any(count >= 2 for _, count in counts)
 
@@ -83,8 +82,7 @@ def test_seed_satisfies_cross_experiment_sample_scenario(db: Session):
     db.flush()
 
     counts = db.exec(
-        select(ExperimentSample.sample_id, func.count())
-        .group_by(ExperimentSample.sample_id)
+        select(ExperimentSample.sample_id, func.count()).group_by(ExperimentSample.sample_id)
     ).all()
     assert any(count >= 2 for _, count in counts)
 
@@ -170,7 +168,9 @@ def test_seed_is_idempotent(db: Session):
 
     assert (r1, p1, m1, s1, e1, es1, me1) == (r2, p2, m2, s2, e2, es2, me2) == (4, 2, 4, 3, 3, 4, 4)
     assert alice_after.name == "Alice Tan (renamed)", "Seed must not overwrite existing researchers"
-    assert glucose_after.description == "Mutated description", "Seed must not overwrite existing projects"
+    assert glucose_after.description == "Mutated description", (
+        "Seed must not overwrite existing projects"
+    )
     assert alice_glucose_after.joined_at == alice_glucose_joined_at, (
         "Seed must not re-stamp membership joined_at"
     )

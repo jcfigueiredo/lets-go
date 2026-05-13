@@ -5,16 +5,16 @@ Revises: 922df8d00757
 Create Date: 2026-05-13 13:16:06.691319
 
 """
-from typing import Sequence, Union
 
-from alembic import op
+from collections.abc import Sequence
+
 import sqlalchemy as sa
+from alembic import op
 
-
-revision: str = 'd969c6ea8896'
-down_revision: Union[str, None] = '922df8d00757'
-branch_labels: Union[str, Sequence[str], None] = None
-depends_on: Union[str, Sequence[str], None] = None
+revision: str = "d969c6ea8896"
+down_revision: str | None = "922df8d00757"
+branch_labels: str | Sequence[str] | None = None
+depends_on: str | Sequence[str] | None = None
 
 
 def upgrade() -> None:
@@ -38,8 +38,18 @@ def upgrade() -> None:
             nullable=False,
         ),
         sa.Column("follows_up_experiment_id", sa.BigInteger(), nullable=True),
-        sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.text("now()"), nullable=False),
-        sa.Column("updated_at", sa.DateTime(timezone=True), server_default=sa.text("now()"), nullable=False),
+        sa.Column(
+            "created_at",
+            sa.DateTime(timezone=True),
+            server_default=sa.text("now()"),
+            nullable=False,
+        ),
+        sa.Column(
+            "updated_at",
+            sa.DateTime(timezone=True),
+            server_default=sa.text("now()"),
+            nullable=False,
+        ),
         sa.CheckConstraint(
             "end_date IS NULL OR start_date IS NULL OR end_date >= start_date",
             name="experiment_date_order",
@@ -48,11 +58,15 @@ def upgrade() -> None:
             "follows_up_experiment_id IS NULL OR follows_up_experiment_id <> id",
             name="experiment_no_self_follow_up",
         ),
-        sa.ForeignKeyConstraint(["follows_up_experiment_id"], ["experiments.id"], ondelete="RESTRICT"),
+        sa.ForeignKeyConstraint(
+            ["follows_up_experiment_id"], ["experiments.id"], ondelete="RESTRICT"
+        ),
         sa.ForeignKeyConstraint(["project_id"], ["projects.id"], ondelete="RESTRICT"),
         sa.PrimaryKeyConstraint("id"),
     )
-    op.create_index("ix_experiments_follows_up_experiment_id", "experiments", ["follows_up_experiment_id"])
+    op.create_index(
+        "ix_experiments_follows_up_experiment_id", "experiments", ["follows_up_experiment_id"]
+    )
     op.create_index("ix_experiments_project_id", "experiments", ["project_id"])
 
 

@@ -5,16 +5,16 @@ Revises: 3278c7aa635e
 Create Date: 2026-05-13 13:30:46.801587
 
 """
-from typing import Sequence, Union
 
-from alembic import op
+from collections.abc import Sequence
+
 import sqlalchemy as sa
+from alembic import op
 
-
-revision: str = 'f6bf29205893'
-down_revision: Union[str, None] = '3278c7aa635e'
-branch_labels: Union[str, Sequence[str], None] = None
-depends_on: Union[str, Sequence[str], None] = None
+revision: str = "f6bf29205893"
+down_revision: str | None = "3278c7aa635e"
+branch_labels: str | Sequence[str] | None = None
+depends_on: str | Sequence[str] | None = None
 
 
 def upgrade() -> None:
@@ -40,16 +40,29 @@ def upgrade() -> None:
         sa.Column("categorical_value", sa.String(), nullable=True),
         sa.Column("text_value", sa.String(), nullable=True),
         sa.Column("notes", sa.String(), nullable=True),
-        sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.text("now()"), nullable=False),
-        sa.Column("updated_at", sa.DateTime(timezone=True), server_default=sa.text("now()"), nullable=False),
+        sa.Column(
+            "created_at",
+            sa.DateTime(timezone=True),
+            server_default=sa.text("now()"),
+            nullable=False,
+        ),
+        sa.Column(
+            "updated_at",
+            sa.DateTime(timezone=True),
+            server_default=sa.text("now()"),
+            nullable=False,
+        ),
         sa.CheckConstraint(
             """(
-                (kind = 'numeric'     AND numeric_value IS NOT NULL AND unit IS NOT NULL
-                                      AND categorical_value IS NULL AND text_value IS NULL)
-             OR (kind = 'categorical' AND categorical_value IS NOT NULL
-                                      AND numeric_value IS NULL AND unit IS NULL AND text_value IS NULL)
-             OR (kind = 'text'        AND text_value IS NOT NULL
-                                      AND numeric_value IS NULL AND unit IS NULL AND categorical_value IS NULL)
+                (kind = 'numeric'
+                    AND numeric_value IS NOT NULL AND unit IS NOT NULL
+                    AND categorical_value IS NULL AND text_value IS NULL)
+             OR (kind = 'categorical'
+                    AND categorical_value IS NOT NULL
+                    AND numeric_value IS NULL AND unit IS NULL AND text_value IS NULL)
+             OR (kind = 'text'
+                    AND text_value IS NOT NULL
+                    AND numeric_value IS NULL AND unit IS NULL AND categorical_value IS NULL)
             )""",
             name="measurement_value_matches_kind",
         ),

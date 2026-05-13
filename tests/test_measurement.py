@@ -8,7 +8,6 @@ from sqlmodel import Session, select
 
 from lab.models import Measurement, MeasurementKind
 
-
 # ── Valid kinds ─────────────────────────────────────────────────────────────
 
 
@@ -96,7 +95,5 @@ def test_query_measurements_for_experiment(db: Session, factories):
         factories.numeric_measurement(experiment_id=exp.id)
     db.flush()
 
-    rows = db.exec(
-        select(Measurement).where(Measurement.experiment_id == exp.id)
-    ).all()
+    rows = db.exec(select(Measurement).where(Measurement.experiment_id == exp.id)).all()
     assert len(rows) == 3

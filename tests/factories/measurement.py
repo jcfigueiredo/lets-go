@@ -8,7 +8,6 @@ from tests.factories._base import _ModelFactory
 from tests.factories.experiment import ExperimentFactory
 from tests.factories.researcher import ResearcherFactory
 
-
 # Three measurement factories — one per kind. Each populates the kind-specific
 # columns and leaves the others NULL (matching the CHECK constraint). No
 # ``sqlalchemy_get_or_create``: tests need to verify the CHECK by trying invalid

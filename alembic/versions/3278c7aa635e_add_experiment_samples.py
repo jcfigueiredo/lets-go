@@ -5,16 +5,16 @@ Revises: d969c6ea8896
 Create Date: 2026-05-13 13:23:13.476608
 
 """
-from typing import Sequence, Union
 
-from alembic import op
+from collections.abc import Sequence
+
 import sqlalchemy as sa
+from alembic import op
 
-
-revision: str = '3278c7aa635e'
-down_revision: Union[str, None] = 'd969c6ea8896'
-branch_labels: Union[str, Sequence[str], None] = None
-depends_on: Union[str, Sequence[str], None] = None
+revision: str = "3278c7aa635e"
+down_revision: str | None = "d969c6ea8896"
+branch_labels: str | Sequence[str] | None = None
+depends_on: str | Sequence[str] | None = None
 
 
 def upgrade() -> None:

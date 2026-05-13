@@ -66,7 +66,5 @@ def test_sample_used_across_multiple_experiments(db: Session, factories):
     db.add(ExperimentSample(experiment_id=exp_b.id, sample_id=sample.id))
     db.flush()
 
-    rows = db.exec(
-        select(ExperimentSample).where(ExperimentSample.sample_id == sample.id)
-    ).all()
+    rows = db.exec(select(ExperimentSample).where(ExperimentSample.sample_id == sample.id)).all()
     assert len(rows) == 2

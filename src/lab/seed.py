@@ -33,10 +33,18 @@ from lab.models import (
 
 def _seed_researchers(session: Session) -> None:
     data = [
-        {"name": "Alice Tan",   "email": "alice@lab.example",   "role": ResearcherRole.PRINCIPAL_INVESTIGATOR},
-        {"name": "Bob Singh",   "email": "bob@lab.example",     "role": ResearcherRole.LAB_TECHNICIAN},
-        {"name": "Carol Liu",   "email": "carol@lab.example",   "role": ResearcherRole.GRADUATE_STUDENT},
-        {"name": "Diego Cruz",  "email": "diego@lab.example",   "role": ResearcherRole.POSTDOC},
+        {
+            "name": "Alice Tan",
+            "email": "alice@lab.example",
+            "role": ResearcherRole.PRINCIPAL_INVESTIGATOR,
+        },
+        {"name": "Bob Singh", "email": "bob@lab.example", "role": ResearcherRole.LAB_TECHNICIAN},
+        {
+            "name": "Carol Liu",
+            "email": "carol@lab.example",
+            "role": ResearcherRole.GRADUATE_STUDENT,
+        },
+        {"name": "Diego Cruz", "email": "diego@lab.example", "role": ResearcherRole.POSTDOC},
     ]
     stmt = insert(Researcher).values(data).on_conflict_do_nothing(index_elements=["email"])
     session.execute(stmt)
@@ -49,8 +57,16 @@ def _seed_projects(session: Session) -> None:
     we check-then-insert, which yields the same idempotency guarantee.
     """
     seeds = [
-        {"title": "Glucose Tolerance Study", "description": "Long-term tracking of glucose responses.", "status": ProjectStatus.ACTIVE},
-        {"title": "Soil Microbiome Survey",  "description": "Comparative survey across three watersheds.", "status": ProjectStatus.PLANNING},
+        {
+            "title": "Glucose Tolerance Study",
+            "description": "Long-term tracking of glucose responses.",
+            "status": ProjectStatus.ACTIVE,
+        },
+        {
+            "title": "Soil Microbiome Survey",
+            "description": "Comparative survey across three watersheds.",
+            "status": ProjectStatus.PLANNING,
+        },
     ]
     for row in seeds:
         existing = session.exec(select(Project).where(Project.title == row["title"])).first()
@@ -81,10 +97,12 @@ def _seed_memberships(session: Session) -> None:
         {"project_id": glucose.id, "researcher_id": alice.id},
         {"project_id": glucose.id, "researcher_id": bob.id},
         {"project_id": glucose.id, "researcher_id": carol.id},
-        {"project_id": soil.id,    "researcher_id": alice.id},
+        {"project_id": soil.id, "researcher_id": alice.id},
     ]
-    stmt = insert(ProjectResearcher).values(memberships).on_conflict_do_nothing(
-        index_elements=["project_id", "researcher_id"]
+    stmt = (
+        insert(ProjectResearcher)
+        .values(memberships)
+        .on_conflict_do_nothing(index_elements=["project_id", "researcher_id"])
     )
     session.execute(stmt)
 
@@ -96,9 +114,24 @@ def _seed_samples(session: Session) -> None:
     ``accession_code`` column.
     """
     data = [
-        {"accession_code": "GTS-001", "specimen_type": "blood", "collected_at": datetime(2026, 1, 15, tzinfo=UTC), "storage_location": "Freezer A / Shelf 1"},
-        {"accession_code": "GTS-002", "specimen_type": "blood", "collected_at": datetime(2026, 2, 10, tzinfo=UTC), "storage_location": "Freezer A / Shelf 1"},
-        {"accession_code": "SMS-001", "specimen_type": "soil",  "collected_at": datetime(2026, 3, 1,  tzinfo=UTC), "storage_location": "Cabinet 4 / Bin 7"},
+        {
+            "accession_code": "GTS-001",
+            "specimen_type": "blood",
+            "collected_at": datetime(2026, 1, 15, tzinfo=UTC),
+            "storage_location": "Freezer A / Shelf 1",
+        },
+        {
+            "accession_code": "GTS-002",
+            "specimen_type": "blood",
+            "collected_at": datetime(2026, 2, 10, tzinfo=UTC),
+            "storage_location": "Freezer A / Shelf 1",
+        },
+        {
+            "accession_code": "SMS-001",
+            "specimen_type": "soil",
+            "collected_at": datetime(2026, 3, 1, tzinfo=UTC),
+            "storage_location": "Cabinet 4 / Bin 7",
+        },
     ]
     stmt = insert(Sample).values(data).on_conflict_do_nothing(index_elements=["accession_code"])
     session.execute(stmt)
@@ -151,9 +184,7 @@ def _seed_experiments(session: Session) -> None:
 
     # Phase 2: follow-up references baseline. The flush above guarantees the
     # baseline row has an ID before we wire the FK.
-    baseline = session.exec(
-        select(Experiment).where(Experiment.title == "Baseline OGTT")
-    ).one()
+    baseline = session.exec(select(Experiment).where(Experiment.title == "Baseline OGTT")).one()
     follow_up = {
         "project_id": glucose.id,
         "title": "Follow-up OGTT replication",
@@ -182,28 +213,26 @@ def _seed_experiment_samples(session: Session) -> None:
     """
     session.flush()
 
-    baseline = session.exec(
-        select(Experiment).where(Experiment.title == "Baseline OGTT")
-    ).one()
+    baseline = session.exec(select(Experiment).where(Experiment.title == "Baseline OGTT")).one()
     follow_up = session.exec(
         select(Experiment).where(Experiment.title == "Follow-up OGTT replication")
     ).one()
-    watershed = session.exec(
-        select(Experiment).where(Experiment.title == "Watershed A 16S")
-    ).one()
+    watershed = session.exec(select(Experiment).where(Experiment.title == "Watershed A 16S")).one()
 
     gts1 = session.exec(select(Sample).where(Sample.accession_code == "GTS-001")).one()
     gts2 = session.exec(select(Sample).where(Sample.accession_code == "GTS-002")).one()
     sms1 = session.exec(select(Sample).where(Sample.accession_code == "SMS-001")).one()
 
     rows = [
-        {"experiment_id": baseline.id,  "sample_id": gts1.id},
-        {"experiment_id": baseline.id,  "sample_id": gts2.id},
+        {"experiment_id": baseline.id, "sample_id": gts1.id},
+        {"experiment_id": baseline.id, "sample_id": gts2.id},
         {"experiment_id": follow_up.id, "sample_id": gts1.id},  # GTS-001 reused
         {"experiment_id": watershed.id, "sample_id": sms1.id},
     ]
-    stmt = insert(ExperimentSample).values(rows).on_conflict_do_nothing(
-        index_elements=["experiment_id", "sample_id"]
+    stmt = (
+        insert(ExperimentSample)
+        .values(rows)
+        .on_conflict_do_nothing(index_elements=["experiment_id", "sample_id"])
     )
     session.execute(stmt)
 
@@ -230,21 +259,43 @@ def _seed_measurements(session: Session) -> None:
 
     rows = [
         # Numeric: glucose concentration
-        {"experiment_id": baseline.id, "sample_id": gts1.id, "recorded_by": alice.id,
-         "recorded_at": datetime(2026, 1, 21, 9, 0, tzinfo=UTC),
-         "kind": MeasurementKind.NUMERIC, "numeric_value": Decimal("95.2"), "unit": "mg/dL"},
+        {
+            "experiment_id": baseline.id,
+            "sample_id": gts1.id,
+            "recorded_by": alice.id,
+            "recorded_at": datetime(2026, 1, 21, 9, 0, tzinfo=UTC),
+            "kind": MeasurementKind.NUMERIC,
+            "numeric_value": Decimal("95.2"),
+            "unit": "mg/dL",
+        },
         # Numeric: post-glucose reading
-        {"experiment_id": baseline.id, "sample_id": gts1.id, "recorded_by": alice.id,
-         "recorded_at": datetime(2026, 1, 21, 11, 0, tzinfo=UTC),
-         "kind": MeasurementKind.NUMERIC, "numeric_value": Decimal("142.7"), "unit": "mg/dL"},
+        {
+            "experiment_id": baseline.id,
+            "sample_id": gts1.id,
+            "recorded_by": alice.id,
+            "recorded_at": datetime(2026, 1, 21, 11, 0, tzinfo=UTC),
+            "kind": MeasurementKind.NUMERIC,
+            "numeric_value": Decimal("142.7"),
+            "unit": "mg/dL",
+        },
         # Categorical: outcome
-        {"experiment_id": baseline.id, "sample_id": gts1.id, "recorded_by": bob.id,
-         "recorded_at": datetime(2026, 1, 21, 12, 0, tzinfo=UTC),
-         "kind": MeasurementKind.CATEGORICAL, "categorical_value": "normal_response"},
+        {
+            "experiment_id": baseline.id,
+            "sample_id": gts1.id,
+            "recorded_by": bob.id,
+            "recorded_at": datetime(2026, 1, 21, 12, 0, tzinfo=UTC),
+            "kind": MeasurementKind.CATEGORICAL,
+            "categorical_value": "normal_response",
+        },
         # Text observation
-        {"experiment_id": watershed.id, "sample_id": sms1.id, "recorded_by": alice.id,
-         "recorded_at": datetime(2026, 3, 6, 14, 0, tzinfo=UTC),
-         "kind": MeasurementKind.TEXT, "text_value": "Topsoil heterogeneous; visible root debris."},
+        {
+            "experiment_id": watershed.id,
+            "sample_id": sms1.id,
+            "recorded_by": alice.id,
+            "recorded_at": datetime(2026, 3, 6, 14, 0, tzinfo=UTC),
+            "kind": MeasurementKind.TEXT,
+            "text_value": "Topsoil heterogeneous; visible root debris.",
+        },
     ]
     for row in rows:
         existing = session.exec(

@@ -29,8 +29,7 @@ def test_scenario_1_project_with_multiple_researchers(db: Session):
     db.flush()
 
     counts = db.exec(
-        select(ProjectResearcher.project_id, func.count())
-        .group_by(ProjectResearcher.project_id)
+        select(ProjectResearcher.project_id, func.count()).group_by(ProjectResearcher.project_id)
     ).all()
     assert any(count >= 2 for _, count in counts), (
         "Expected at least one project with ≥2 researchers"
@@ -54,8 +53,7 @@ def test_scenario_3_sample_used_across_multiple_experiments(db: Session):
     db.flush()
 
     counts = db.exec(
-        select(ExperimentSample.sample_id, func.count())
-        .group_by(ExperimentSample.sample_id)
+        select(ExperimentSample.sample_id, func.count()).group_by(ExperimentSample.sample_id)
     ).all()
     assert any(count >= 2 for _, count in counts), (
         "Expected at least one sample used in ≥2 experiments"

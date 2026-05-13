@@ -28,10 +28,12 @@ from sqlalchemy import (
     CheckConstraint,
     Column,
     DateTime,
-    Enum as SAEnum,
     ForeignKey,
     Numeric,
     func,
+)
+from sqlalchemy import (
+    Enum as SAEnum,
 )
 from sqlmodel import Field, SQLModel
 
@@ -47,12 +49,15 @@ class Measurement(SQLModel, table=True):
     __table_args__ = (
         CheckConstraint(
             """(
-                (kind = 'numeric'     AND numeric_value IS NOT NULL AND unit IS NOT NULL
-                                      AND categorical_value IS NULL AND text_value IS NULL)
-             OR (kind = 'categorical' AND categorical_value IS NOT NULL
-                                      AND numeric_value IS NULL AND unit IS NULL AND text_value IS NULL)
-             OR (kind = 'text'        AND text_value IS NOT NULL
-                                      AND numeric_value IS NULL AND unit IS NULL AND categorical_value IS NULL)
+                (kind = 'numeric'
+                    AND numeric_value IS NOT NULL AND unit IS NOT NULL
+                    AND categorical_value IS NULL AND text_value IS NULL)
+             OR (kind = 'categorical'
+                    AND categorical_value IS NOT NULL
+                    AND numeric_value IS NULL AND unit IS NULL AND text_value IS NULL)
+             OR (kind = 'text'
+                    AND text_value IS NOT NULL
+                    AND numeric_value IS NULL AND unit IS NULL AND categorical_value IS NULL)
             )""",
             name="measurement_value_matches_kind",
         ),

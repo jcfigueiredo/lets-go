@@ -6,7 +6,8 @@ A scientist who runs experiments. Has identity, contact, and a lab-global role.
 from datetime import datetime
 from enum import StrEnum
 
-from sqlalchemy import BigInteger, Column, DateTime, Enum as SAEnum, func
+from sqlalchemy import BigInteger, Column, DateTime, func
+from sqlalchemy import Enum as SAEnum
 from sqlmodel import Field, SQLModel
 
 

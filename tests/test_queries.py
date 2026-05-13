@@ -77,11 +77,11 @@ def test_follow_up_chain(db: Session):
     db.flush()
 
     chains = db.exec(
-        select(Experiment.title)
-        .where(
+        select(Experiment.title).where(
             Experiment.id.in_(
-                select(Experiment.follows_up_experiment_id)
-                .where(Experiment.follows_up_experiment_id.is_not(None))
+                select(Experiment.follows_up_experiment_id).where(
+                    Experiment.follows_up_experiment_id.is_not(None)
+                )
             )
         )
     ).all()

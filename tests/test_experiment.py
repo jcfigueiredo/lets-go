@@ -49,9 +49,7 @@ def test_no_self_follow_up_check(db: Session, factories):
 def test_follows_up_chain(db: Session, factories):
     first = factories.experiment(title="First study")
     db.flush()
-    second = factories.experiment(
-        title="Replication", follows_up_experiment_id=first.id
-    )
+    second = factories.experiment(title="Replication", follows_up_experiment_id=first.id)
     db.flush()
 
     db.refresh(second)
