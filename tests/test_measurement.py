@@ -60,6 +60,12 @@ def test_text_with_unit_rejected(db: Session, factories):
         factories.text_measurement(unit="g")
 
 
+def test_numeric_with_categorical_column_rejected(db: Session, factories):
+    """Reviewer-flagged gap closure: numeric kind must reject extra columns from other kinds."""
+    with pytest.raises(IntegrityError):
+        factories.numeric_measurement(categorical_value="positive")
+
+
 # ── FK and nullability ─────────────────────────────────────────────────────
 
 

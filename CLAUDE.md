@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 This is a **take-home interview exercise** for a "laboratory experiment tracking system." Spec at `lab-experiment-tracking-system.md`. Design at `docs/superpowers/specs/2026-05-12-core-infra-design.md`. Implementation plan at `docs/superpowers/plans/2026-05-12-core-infra.md`.
 
-**Current state:** Core infra landed. Schema design (Researcher/Project/Experiment/Sample/Measurement) is **deferred** to a follow-up spec + plan cycle.
+**Current state:** Schema complete — 7 aggregates, 4 enums (`researcher_role`, `project_status`, `experiment_status`, `measurement_kind`), polymorphic measurements with a CHECK-constraint discriminator. All four spec-required seed scenarios are exercised end-to-end in `tests/test_seed_scenarios.py`. 100% branch coverage maintained throughout. ~77 tests.
 
 ## What this project is
 
@@ -79,3 +79,7 @@ These are decisions already settled. If you find yourself about to do one of the
 - **Don't add tests that test SQLAlchemy/library contracts.** The trimmed isolation-pair tests (`abc5afd`) were testing SAVEPOINT rollback behavior — that's SQLAlchemy's job, not ours. Test our code, not our dependencies.
 - **Don't add `# pragma: no cover` without an inline comment** justifying why. The coverage gate is the design pressure; pragmas are escape hatches with an audit requirement.
 - **Don't swap out `pg_isready` polling in `make up` for `docker compose up -d --wait` yet.** Compose 2.17+ is required; user is on 2.15.1. Pending upgrade per Enhancement D.
+- **Don't break seed idempotency.** Every seed contribution uses either `INSERT … ON CONFLICT DO NOTHING` (when there's a UNIQUE-anchorable column) or a check-then-insert pattern in Python. `make seed && make seed` must produce the same final state. The strengthened `test_seed_is_idempotent` (which mutates rows between seeds and asserts mutations survive) is the gate.
+- **Don't add SQLModel `Relationship()` declarations on models** unless a concrete query pattern demands them. The aggregates intentionally lack `Relationship` attributes — queries use explicit `select().join()` instead. Relationships add lazy-load surprises and aren't free; add them only when a real query pattern demands them and the cost is justified.
+- **Don't loosen the `measurement_value_matches_kind` CHECK constraint.** It's the load-bearing invariant for D3 (STI polymorphism). Adding a new measurement kind = a migration that updates BOTH the `measurement_kind` ENUM and the CHECK constraint. Never strip the CHECK to "make it flexible" — go to JSONB instead if you genuinely need that.
+- **Don't introduce `Repository` / `UnitOfWork` / `Scenario` abstractions.** Tried once, reverted. For this take-home's scope, plain `_seed_<entity>(session)` functions + direct `session.exec(select(...))` from tests is the proven pattern. Reviewing a "would you add a service layer in production?" — answer "yes, when there's a second consumer; for now it's premature."
