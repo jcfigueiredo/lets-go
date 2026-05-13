@@ -75,3 +75,8 @@ lint: ## Lint with ruff
 
 format: ## Format with ruff
 	uv run ruff format .
+
+.PHONY: load
+
+load: ## Run DB load test; default N=100000. Override: make load N=1000000
+	uv run python -m scripts.load_test --rows $${N:-100000}
