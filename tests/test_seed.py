@@ -26,15 +26,21 @@ def test_seed_creates_projects(db: Session):
 
 
 def test_seed_is_idempotent(db: Session):
-    """Idempotency: re-running seed must not change row counts AND must not overwrite existing rows."""
+    """Idempotency: re-running seed must not change row counts AND must not overwrite existing rows.
+
+    Asserts mutation survival for BOTH idempotency strategies: ``ON CONFLICT DO NOTHING``
+    (researchers, anchored on UNIQUE email) and check-then-insert (projects, no UNIQUE on title).
+    """
     seed(db)
     db.flush()
     r1 = db.exec(select(func.count()).select_from(Researcher)).one()
     p1 = db.exec(select(func.count()).select_from(Project)).one()
 
-    # Mutate a row; if seed accidentally upserts, this change will be reverted.
+    # Mutate one of each kind; if seed accidentally upserts, mutations revert.
     alice = db.exec(select(Researcher).where(Researcher.email == "alice@lab.example")).one()
     alice.name = "Alice Tan (renamed)"
+    glucose = db.exec(select(Project).where(Project.title == "Glucose Tolerance Study")).one()
+    glucose.description = "Mutated description"
     db.flush()
 
     seed(db)
@@ -42,6 +48,8 @@ def test_seed_is_idempotent(db: Session):
     r2 = db.exec(select(func.count()).select_from(Researcher)).one()
     p2 = db.exec(select(func.count()).select_from(Project)).one()
     alice_after = db.exec(select(Researcher).where(Researcher.email == "alice@lab.example")).one()
+    glucose_after = db.exec(select(Project).where(Project.title == "Glucose Tolerance Study")).one()
 
     assert (r1, p1) == (r2, p2) == (4, 2)
-    assert alice_after.name == "Alice Tan (renamed)", "Seed must not overwrite existing rows"
+    assert alice_after.name == "Alice Tan (renamed)", "Seed must not overwrite existing researchers"
+    assert glucose_after.description == "Mutated description", "Seed must not overwrite existing projects"
