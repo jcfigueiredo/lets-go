@@ -1184,7 +1184,7 @@ take-home:
 
 Take-home exercise. Designs the Postgres data model that will sit under a
 laboratory experiment tracking system. The deliverable is the schema +
-seed data + this README; see [`lab-experiment-tracking-system.txt`](./lab-experiment-tracking-system.txt)
+seed data + this README; see [`lab-experiment-tracking-system.md`](./lab-experiment-tracking-system.md)
 for the full brief.
 
 > **Status:** Core infra only. The schema design lands in a follow-up.

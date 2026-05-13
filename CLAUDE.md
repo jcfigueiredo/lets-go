@@ -4,13 +4,13 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Repository status
 
-This is a **take-home interview exercise** for a "laboratory experiment tracking system." Spec at `lab-experiment-tracking-system.txt`. Design at `docs/superpowers/specs/2026-05-12-core-infra-design.md`. Implementation plan at `docs/superpowers/plans/2026-05-12-core-infra.md`.
+This is a **take-home interview exercise** for a "laboratory experiment tracking system." Spec at `lab-experiment-tracking-system.md`. Design at `docs/superpowers/specs/2026-05-12-core-infra-design.md`. Implementation plan at `docs/superpowers/plans/2026-05-12-core-infra.md`.
 
 **Current state:** Core infra landed. Schema design (Researcher/Project/Experiment/Sample/Measurement) is **deferred** to a follow-up spec + plan cycle.
 
 ## What this project is
 
-A data model for a **laboratory experiment tracking system**, delivered as Postgres migrations + Docker + seed data. The full brief is in `lab-experiment-tracking-system.txt`; read it before designing anything. Key entities and the relationships that drive the schema:
+A data model for a **laboratory experiment tracking system**, delivered as Postgres migrations + Docker + seed data. The full brief is in `lab-experiment-tracking-system.md`; read it before designing anything. Key entities and the relationships that drive the schema:
 
 - **Researchers** ↔ **Projects**: many-to-many (researchers collaborate on multiple projects; projects have multiple researchers). Roles (PI, lab tech, grad student, …) are tracked per researcher — open question whether role is global or per-project.
 - **Projects** → **Experiments**: one-to-many. Every experiment belongs to **exactly one** project.

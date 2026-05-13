@@ -7,7 +7,7 @@
 
 ## Context
 
-This repo is the take-home for a "Laboratory Experiment Tracking System" interview. The full brief is in [`lab-experiment-tracking-system.txt`](../../../lab-experiment-tracking-system.txt). The deliverable per the spec is:
+This repo is the take-home for a "Laboratory Experiment Tracking System" interview. The full brief is in [`lab-experiment-tracking-system.md`](../../../lab-experiment-tracking-system.md). The deliverable per the spec is:
 
 1. Data model implemented as Postgres migrations
 2. Single-command Docker bootstrap producing a running Postgres with schema + seed data
