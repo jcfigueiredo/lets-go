@@ -63,6 +63,15 @@ def test_seed_is_idempotent(db: Session):
     alice.name = "Alice Tan (renamed)"
     glucose = db.exec(select(Project).where(Project.title == "Glucose Tolerance Study")).one()
     glucose.description = "Mutated description"
+    # Memberships have no mutable columns to rename, but `joined_at` is server-stamped —
+    # capture it to assert re-seed doesn't re-stamp (which would silently change history).
+    alice_glucose = db.exec(
+        select(ProjectResearcher).where(
+            ProjectResearcher.project_id == glucose.id,
+            ProjectResearcher.researcher_id == alice.id,
+        )
+    ).one()
+    alice_glucose_joined_at = alice_glucose.joined_at
     db.flush()
 
     seed(db)
@@ -72,7 +81,16 @@ def test_seed_is_idempotent(db: Session):
     m2 = db.exec(select(func.count()).select_from(ProjectResearcher)).one()
     alice_after = db.exec(select(Researcher).where(Researcher.email == "alice@lab.example")).one()
     glucose_after = db.exec(select(Project).where(Project.title == "Glucose Tolerance Study")).one()
+    alice_glucose_after = db.exec(
+        select(ProjectResearcher).where(
+            ProjectResearcher.project_id == glucose.id,
+            ProjectResearcher.researcher_id == alice.id,
+        )
+    ).one()
 
     assert (r1, p1, m1) == (r2, p2, m2) == (4, 2, 4)
     assert alice_after.name == "Alice Tan (renamed)", "Seed must not overwrite existing researchers"
     assert glucose_after.description == "Mutated description", "Seed must not overwrite existing projects"
+    assert alice_glucose_after.joined_at == alice_glucose_joined_at, (
+        "Seed must not re-stamp membership joined_at"
+    )

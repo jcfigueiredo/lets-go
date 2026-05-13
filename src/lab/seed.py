@@ -56,8 +56,9 @@ def _seed_memberships(session: Session) -> None:
     Alice (PI), Bob (technician), Carol (grad student). Soil Microbiome Survey
     gets Alice as a single-researcher control case.
 
-    Idempotent via ``INSERT … ON CONFLICT DO NOTHING`` on the composite PK
-    (defaulted when no ``index_elements`` are supplied).
+    Idempotent via ``INSERT … ON CONFLICT DO NOTHING`` anchored explicitly on
+    the composite PK columns — robust against any future UNIQUE constraint
+    additions that would otherwise change the default conflict target.
     """
     session.flush()  # ensure researchers + projects have IDs
 
@@ -73,7 +74,9 @@ def _seed_memberships(session: Session) -> None:
         {"project_id": glucose.id, "researcher_id": carol.id},
         {"project_id": soil.id,    "researcher_id": alice.id},
     ]
-    stmt = insert(ProjectResearcher).values(memberships).on_conflict_do_nothing()
+    stmt = insert(ProjectResearcher).values(memberships).on_conflict_do_nothing(
+        index_elements=["project_id", "researcher_id"]
+    )
     session.execute(stmt)
 
 
