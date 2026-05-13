@@ -84,3 +84,66 @@ take-home:
   engine (`lab`). Now that the `db` fixture exists (Task 7), `test_db.py`
   could optionally be migrated to use it. Not necessary for correctness;
   just a consistency tidy.
+
+## Enhancement H — Comparative load test
+
+**Why later:** The load test in `scripts/load_test.py` reports current planner
+choices. A useful follow-up is re-running it after schema changes and diffing
+verdicts. Catches the "added a column, accidentally invalidated an index"
+failure mode silently.
+
+**Sketch:** capture verdict tuples per run to a JSON file (e.g.
+`docs/load-baselines/2026-05-13.json`); a `make load-diff` target compares
+the current run against the baseline. Out of scope for the take-home; useful
+in a real CI pipeline.
+
+## Enhancement I — Concurrent client simulation
+
+**Why later:** The current load test is sequential. Real workloads contend
+for locks, especially on write-heavy paths. `locust` or `pgbench` would
+simulate N concurrent researchers querying and recording measurements.
+
+**Sketch:** `locust` script that mixes read queries (the 10 benchmark queries)
+with write paths (insert measurement, follow-up insert). Validates index
+choices under contention and surfaces lock-wait pathology.
+
+## Enhancement J — `track_io_timing` for I/O-vs-CPU breakdown
+
+**Why later:** Postgres' `track_io_timing` config knob, if enabled, makes
+EXPLAIN ANALYZE report I/O timing separately from CPU. Gold for "is this
+query I/O-bound or CPU-bound at scale?" but off by default and adds
+per-query overhead. Worth knowing for the interview answer; not worth
+turning on for the take-home.
+
+**Sketch:** `ALTER SYSTEM SET track_io_timing = on; SELECT pg_reload_conf();`
+in the load test's setup, then parse `Shared I/O Read Time` from EXPLAIN
+output.
+
+## Enhancement K — Index-only scan validation
+
+**Why later:** Some queries should achieve "Index Only Scan" (no heap
+fetches) — the gold standard for read-heavy workloads. Achievable when the
+index covers all columns the query needs AND the visibility map is current.
+Validating this would catch indexes that *could* be covering but aren't due
+to VACUUM lag.
+
+**Sketch:** extend the load-test verdict logic to distinguish "Index Scan"
+from "Index Only Scan" and report a separate marker for the latter.
+Especially relevant for the composite `(experiment_id, recorded_at)` —
+if the query selects only those two columns, it should be Index Only.
+
+## Enhancement L — Drop or partial-index `ix_measurements_kind`
+
+**Why later:** The load test surfaced that `ix_measurements_kind` is
+marginal — at 60% `kind='numeric'` selectivity, the planner correctly
+avoids it (verdict ✗ at N=1M). It earns its place only when combined
+with a more selective second predicate (e.g., `unit = 'mg/dL'`).
+
+**Sketch:** two options:
+1. Drop the index entirely and rely on the combined predicate hitting other
+   indexes (e.g., a future composite on `(kind, recorded_at)`).
+2. Make it a partial index: `CREATE INDEX … ON measurements (kind) WHERE
+   kind <> 'numeric'` — useful for the rarer categorical/text filters.
+
+Currently keeping the index for now; the load-test report honestly surfaces
+when it's used and when it isn't.

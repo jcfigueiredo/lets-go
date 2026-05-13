@@ -105,6 +105,11 @@ def migrate(load_url: str) -> None:
     Subprocess reuses the existing alembic infrastructure (the Makefile's
     ``migrate-test`` target does the same dance). Avoids embedding alembic's
     Python API in the script.
+
+    The URL is passed as-is with the SQLAlchemy ``+psycopg`` dialect marker
+    intact; ``alembic/env.py`` reads it via ``engine_from_config``, which is
+    SQLAlchemy and handles the marker correctly. Compare ``_admin_url()``,
+    which strips the marker because it feeds psycopg's libpq parser directly.
     """
     env = {**os.environ, "DATABASE_URL": load_url}
     subprocess.run(
@@ -515,6 +520,12 @@ def run_benchmarks(conn: psycopg.Connection) -> list[QueryResult]:
     return results
 
 
+# Postgres' planner switches from "prefer seq scan" to "prefer index scan"
+# around a few hundred to low-thousands of rows for typical row widths
+# (governed by random_page_cost=4.0 vs seq_page_cost=1.0 defaults). 1000 is
+# the round-number cutoff: tables under this size are correctly seq-scanned,
+# so a missing index there is NOT a verdict failure — it's planner-optimal.
+# Tunable if a query plan surfaces something surprising in this range.
 _SMALL_TABLE_THRESHOLD = 1000
 
 
