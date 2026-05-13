@@ -10,6 +10,7 @@ check-then-insert pattern.
 """
 
 from datetime import UTC, date, datetime
+from decimal import Decimal
 
 from sqlalchemy.dialects.postgresql import insert
 from sqlmodel import Session, select
@@ -19,6 +20,8 @@ from lab.models import (
     Experiment,
     ExperimentSample,
     ExperimentStatus,
+    Measurement,
+    MeasurementKind,
     Project,
     ProjectResearcher,
     ProjectStatus,
@@ -205,6 +208,56 @@ def _seed_experiment_samples(session: Session) -> None:
     session.execute(stmt)
 
 
+def _seed_measurements(session: Session) -> None:
+    """Seed measurements across all three kinds — satisfies the spec scenario
+    "measurements of more than one kind". Two numeric + one categorical + one
+    text = 4 rows covering all three kinds.
+
+    Idempotency: no UNIQUE column to anchor ``ON CONFLICT`` against, so use
+    check-then-insert on a natural composite (experiment_id, recorded_at,
+    recorded_by).
+    """
+    session.flush()
+
+    baseline = session.exec(select(Experiment).where(Experiment.title == "Baseline OGTT")).one()
+    watershed = session.exec(select(Experiment).where(Experiment.title == "Watershed A 16S")).one()
+
+    alice = session.exec(select(Researcher).where(Researcher.email == "alice@lab.example")).one()
+    bob = session.exec(select(Researcher).where(Researcher.email == "bob@lab.example")).one()
+
+    gts1 = session.exec(select(Sample).where(Sample.accession_code == "GTS-001")).one()
+    sms1 = session.exec(select(Sample).where(Sample.accession_code == "SMS-001")).one()
+
+    rows = [
+        # Numeric: glucose concentration
+        {"experiment_id": baseline.id, "sample_id": gts1.id, "recorded_by": alice.id,
+         "recorded_at": datetime(2026, 1, 21, 9, 0, tzinfo=UTC),
+         "kind": MeasurementKind.NUMERIC, "numeric_value": Decimal("95.2"), "unit": "mg/dL"},
+        # Numeric: post-glucose reading
+        {"experiment_id": baseline.id, "sample_id": gts1.id, "recorded_by": alice.id,
+         "recorded_at": datetime(2026, 1, 21, 11, 0, tzinfo=UTC),
+         "kind": MeasurementKind.NUMERIC, "numeric_value": Decimal("142.7"), "unit": "mg/dL"},
+        # Categorical: outcome
+        {"experiment_id": baseline.id, "sample_id": gts1.id, "recorded_by": bob.id,
+         "recorded_at": datetime(2026, 1, 21, 12, 0, tzinfo=UTC),
+         "kind": MeasurementKind.CATEGORICAL, "categorical_value": "normal_response"},
+        # Text observation
+        {"experiment_id": watershed.id, "sample_id": sms1.id, "recorded_by": alice.id,
+         "recorded_at": datetime(2026, 3, 6, 14, 0, tzinfo=UTC),
+         "kind": MeasurementKind.TEXT, "text_value": "Topsoil heterogeneous; visible root debris."},
+    ]
+    for row in rows:
+        existing = session.exec(
+            select(Measurement).where(
+                Measurement.experiment_id == row["experiment_id"],
+                Measurement.recorded_at == row["recorded_at"],
+                Measurement.recorded_by == row["recorded_by"],
+            )
+        ).first()
+        if existing is None:
+            session.add(Measurement(**row))
+
+
 def seed(session: Session) -> None:
     """Apply seed data idempotently."""
     _seed_researchers(session)
@@ -213,6 +266,7 @@ def seed(session: Session) -> None:
     _seed_samples(session)
     _seed_experiments(session)
     _seed_experiment_samples(session)
+    _seed_measurements(session)
 
 
 if __name__ == "__main__":  # pragma: no cover
