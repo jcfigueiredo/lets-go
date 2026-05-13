@@ -4,6 +4,7 @@ from lab.models import (
     Experiment,
     ExperimentSample,
     Measurement,
+    MeasurementKind,
     Project,
     ProjectResearcher,
     Researcher,
@@ -118,9 +119,10 @@ def test_seed_satisfies_multi_kind_scenario(db: Session):
 def test_seed_is_idempotent(db: Session):
     """Idempotency: re-running seed must not change row counts AND must not overwrite existing rows.
 
-    Asserts mutation survival for BOTH idempotency strategies: ``ON CONFLICT DO NOTHING``
-    (researchers, anchored on UNIQUE email; memberships, anchored on composite PK) and
-    check-then-insert (projects, no UNIQUE on title).
+    Asserts mutation survival for all three idempotency strategies across all seven aggregates:
+    - ``ON CONFLICT DO NOTHING`` on a UNIQUE column (researchers, samples)
+    - ``ON CONFLICT DO NOTHING`` on composite PK (memberships, experiment-samples)
+    - check-then-insert in Python (projects, experiments, measurements)
     """
     seed(db)
     db.flush()
@@ -137,8 +139,8 @@ def test_seed_is_idempotent(db: Session):
     alice.name = "Alice Tan (renamed)"
     glucose = db.exec(select(Project).where(Project.title == "Glucose Tolerance Study")).one()
     glucose.description = "Mutated description"
-    # Memberships have no mutable columns to rename, but `joined_at` is server-stamped —
-    # capture it to assert re-seed doesn't re-stamp (which would silently change history).
+    # Memberships and experiment-samples have no naturally-mutable columns —
+    # capture their server-stamped timestamps and assert they don't get re-stamped.
     alice_glucose = db.exec(
         select(ProjectResearcher).where(
             ProjectResearcher.project_id == glucose.id,
@@ -146,6 +148,24 @@ def test_seed_is_idempotent(db: Session):
         )
     ).one()
     alice_glucose_joined_at = alice_glucose.joined_at
+    gts1 = db.exec(select(Sample).where(Sample.accession_code == "GTS-001")).one()
+    gts1.storage_location = "Mutated freezer location"
+    baseline = db.exec(select(Experiment).where(Experiment.title == "Baseline OGTT")).one()
+    baseline.hypothesis = "Mutated hypothesis text"
+    baseline_gts1 = db.exec(
+        select(ExperimentSample).where(
+            ExperimentSample.experiment_id == baseline.id,
+            ExperimentSample.sample_id == gts1.id,
+        )
+    ).one()
+    baseline_gts1_assigned_at = baseline_gts1.assigned_at
+    glucose_reading = db.exec(
+        select(Measurement).where(
+            Measurement.kind == MeasurementKind.NUMERIC,
+            Measurement.experiment_id == baseline.id,
+        )
+    ).first()
+    glucose_reading.notes = "Mutated note on a glucose reading"
     db.flush()
 
     seed(db)
@@ -165,6 +185,17 @@ def test_seed_is_idempotent(db: Session):
             ProjectResearcher.researcher_id == alice.id,
         )
     ).one()
+    gts1_after = db.exec(select(Sample).where(Sample.accession_code == "GTS-001")).one()
+    baseline_after = db.exec(select(Experiment).where(Experiment.title == "Baseline OGTT")).one()
+    baseline_gts1_after = db.exec(
+        select(ExperimentSample).where(
+            ExperimentSample.experiment_id == baseline.id,
+            ExperimentSample.sample_id == gts1.id,
+        )
+    ).one()
+    glucose_reading_after = db.exec(
+        select(Measurement).where(Measurement.id == glucose_reading.id)
+    ).one()
 
     assert (r1, p1, m1, s1, e1, es1, me1) == (r2, p2, m2, s2, e2, es2, me2) == (4, 2, 4, 3, 3, 4, 4)
     assert alice_after.name == "Alice Tan (renamed)", "Seed must not overwrite existing researchers"
@@ -173,4 +204,16 @@ def test_seed_is_idempotent(db: Session):
     )
     assert alice_glucose_after.joined_at == alice_glucose_joined_at, (
         "Seed must not re-stamp membership joined_at"
+    )
+    assert gts1_after.storage_location == "Mutated freezer location", (
+        "Seed must not overwrite existing samples"
+    )
+    assert baseline_after.hypothesis == "Mutated hypothesis text", (
+        "Seed must not overwrite existing experiments"
+    )
+    assert baseline_gts1_after.assigned_at == baseline_gts1_assigned_at, (
+        "Seed must not re-stamp experiment-sample assigned_at"
+    )
+    assert glucose_reading_after.notes == "Mutated note on a glucose reading", (
+        "Seed must not overwrite existing measurements"
     )

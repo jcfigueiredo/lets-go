@@ -29,6 +29,7 @@ from sqlalchemy import (
     Column,
     DateTime,
     ForeignKey,
+    Index,
     Numeric,
     func,
 )
@@ -61,6 +62,15 @@ class Measurement(SQLModel, table=True):
             )""",
             name="measurement_value_matches_kind",
         ),
+        # Composite index supports the dominant query shape: "measurements for
+        # experiment X ordered by recorded_at." Leading column also satisfies
+        # equality-only filters on experiment_id, so no separate single-column
+        # index is needed.
+        Index(
+            "ix_measurements_experiment_id_recorded_at",
+            "experiment_id",
+            "recorded_at",
+        ),
     )
 
     id: int | None = Field(
@@ -72,7 +82,8 @@ class Measurement(SQLModel, table=True):
             BigInteger,
             ForeignKey("experiments.id", ondelete="RESTRICT"),
             nullable=False,
-            index=True,
+            # No index=True here; the composite index in __table_args__ covers
+            # both equality-only filters and ordered scans by recorded_at.
         ),
     )
     sample_id: int | None = Field(

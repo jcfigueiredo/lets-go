@@ -66,7 +66,7 @@ make up              # start postgres, write .env with dynamic port
 make down            # stop postgres
 make migrate         # alembic upgrade head against lab
 make migration m="…" # autogenerate a new revision
-make seed            # apply seed (no-op stub for now)
+make seed            # seed the lab database with demonstration data (idempotent)
 make test            # pytest (100% branch coverage enforced)
 make coverage        # pytest + open htmlcov/index.html
 make lint            # ruff check
@@ -152,6 +152,7 @@ coverage cannot land.
 4. **`bigserial` over UUID** — gain: simpler, faster, smaller; cost: not federation-ready (no federation needed here).
 5. **Free-text `specimen_type`** — gain: accepts any specimen vocabulary; cost: typo risk and no enumeration of valid values.
 6. **Separate `project_status` and `experiment_status` enums** (D7) — gain: distinct lifecycles reflect spec wording ("its own lifecycle status"); cost: two enum types where one could have sufficed.
+7. **`updated_at` auto-refresh via SQLAlchemy ORM, not a Postgres trigger.** The `onupdate=func.now()` declaration fires when the ORM issues an UPDATE through a tracked session; raw SQL (`session.execute(update(...))`, direct `psql` updates, future bulk-update scripts) bypasses it. Production-correct answer: add a `BEFORE UPDATE` trigger on each table with `updated_at`. Deferred for this take-home because the seed never updates rows (idempotency is `ON CONFLICT DO NOTHING` / check-then-insert, not upsert).
 
 ## Open questions for the lab (schema-level)
 
@@ -161,6 +162,7 @@ coverage cannot land.
 4. Is `storage_location` a free-form code or a hierarchical path we should structure?
 5. Are there researchers who serve different roles on different projects?
 6. Are measurements ever recorded by automated instruments without a human attributor? (Currently `recorded_by` is NOT NULL — assumes human attribution.)
+7. Should `experiments.follows_up_experiment_id` chains prevent cycles (A→B→A)? The single-row CHECK prevents self-reference (`id = follows_up_experiment_id`) but multi-row cycles are a domain-service concern, not a DB invariant. Is cycle prevention a real requirement, or do follow-up chains always form trees in practice?
 
 ## Future enhancements
 

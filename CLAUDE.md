@@ -45,7 +45,7 @@ The Makefile is the only user-facing surface. `make help` lists everything. Key 
 ## Architecture
 
 - Postgres 16 in `docker-compose.yml` on a **dynamically assigned host port**. `make up` writes the actual port into `.env`. Do not hard-code `localhost:5432`.
-- `src/lab/`: `config.py` (pydantic-settings), `db.py` (sync engine), `models/` (SQLModel — schema source of truth, currently empty), `seed.py` (no-op stub).
+- `src/lab/`: `config.py` (pydantic-settings), `db.py` (sync engine), `models/` (7 aggregates + 4 enums), `seed.py` (idempotent; all four spec-required seed scenarios covered).
 - `alembic/`: env.py reads `get_settings().DATABASE_URL`; `make migrate-test` overrides to `TEST_DATABASE_URL` via shell.
 - `tests/conftest.py`: autouse env-isolation fixture, session-scoped `test_engine` bound to `TEST_DATABASE_URL`, per-test `db` fixture using the canonical SQLAlchemy SAVEPOINT pattern.
 
