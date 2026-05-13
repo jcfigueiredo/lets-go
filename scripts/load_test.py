@@ -450,35 +450,43 @@ class QueryResult:
     sql: str
     expected_index: str
     used_index: str | None
+    seq_scan_table: str | None
     has_sort_above: bool
     execution_time_ms: float
-    plan_summary: str  # short one-line description, e.g. "Index Scan using uq_..."
+    plan_summary: str
+    forbid_sort: bool
 
 
-def _walk_plan(node: dict) -> tuple[str | None, bool, str]:
-    """Return (index_name, has_sort, summary) by walking the plan tree.
+def _walk_plan(node: dict) -> tuple[str | None, str | None, bool, str]:
+    """Return (index_name, seq_scan_table, has_sort, summary) by walking the plan tree.
 
-    ``index_name`` is the deepest ``Index Name`` found in any descendant.
-    ``has_sort`` is True if any Sort node appears anywhere in the tree.
-    ``summary`` is a single-line description of the top node.
+    - ``index_name`` is the first ``Index Name`` found in any descendant.
+    - ``seq_scan_table`` is the ``Relation Name`` of the first ``Seq Scan`` node, or None.
+    - ``has_sort`` is True if any Sort node appears anywhere.
+    - ``summary`` is a single-line description of the top node, e.g. "Aggregate → uses ix_...".
     """
     index_name: str | None = None
+    seq_scan_table: str | None = None
     has_sort = False
     summary = f"{node['Node Type']}"
 
     def visit(n: dict) -> None:
-        nonlocal index_name, has_sort
+        nonlocal index_name, seq_scan_table, has_sort
         if n["Node Type"] == "Sort":
             has_sort = True
         if "Index Name" in n and index_name is None:
             index_name = n["Index Name"]
+        if n["Node Type"] == "Seq Scan" and "Relation Name" in n and seq_scan_table is None:
+            seq_scan_table = n["Relation Name"]
         for child in n.get("Plans", []):
             visit(child)
 
     visit(node)
     if index_name:
         summary = f"{node['Node Type']} → uses {index_name}"
-    return index_name, has_sort, summary
+    elif seq_scan_table:
+        summary = f"{node['Node Type']} → Seq Scan on {seq_scan_table}"
+    return index_name, seq_scan_table, has_sort, summary
 
 
 def run_benchmarks(conn: psycopg.Connection) -> list[QueryResult]:
@@ -490,19 +498,119 @@ def run_benchmarks(conn: psycopg.Connection) -> list[QueryResult]:
             f"EXPLAIN (FORMAT JSON, ANALYZE) {q.sql}", params
         ).fetchone()[0][0]
         top = plan_json["Plan"]
-        index_name, has_sort, summary = _walk_plan(top)
+        index_name, seq_scan_table, has_sort, summary = _walk_plan(top)
         results.append(
             QueryResult(
                 label=q.label,
                 sql=q.sql,
                 expected_index=q.expected_index,
                 used_index=index_name,
+                seq_scan_table=seq_scan_table,
                 has_sort_above=has_sort,
                 execution_time_ms=plan_json["Execution Time"],
                 plan_summary=summary,
+                forbid_sort=q.forbid_sort,
             )
         )
     return results
+
+
+_SMALL_TABLE_THRESHOLD = 1000
+
+
+def _classify_verdict(conn: psycopg.Connection, r: QueryResult) -> tuple[str, str]:
+    """Classify a query result as 'pass' / 'small-table' / 'fail' with a one-line reason.
+
+    Verdict logic:
+    - "pass" (✓): expected index was used AND any forbid_sort constraint is honored.
+    - "small-table" (—): expected index NOT used, but the planner correctly seq-scanned
+      a table with < ``_SMALL_TABLE_THRESHOLD`` estimated rows (per pg_class.reltuples).
+      The planner is right; at this scale the index isn't worth using.
+    - "fail" (✗): everything else — wrong index, no index on a non-small table, or
+      forbid_sort violated.
+    """
+    used_correct_index = r.used_index == r.expected_index
+    sort_violation = r.forbid_sort and r.has_sort_above
+
+    if used_correct_index and not sort_violation:
+        if r.forbid_sort:
+            return "pass", "used expected index (no Sort — composite serves order)"
+        return "pass", "used expected index"
+
+    if used_correct_index and sort_violation:
+        return "fail", "used expected index but plan contains Sort node above"
+
+    # Index expectation not met — check if planner was right to skip it
+    if r.seq_scan_table is not None:
+        row = conn.execute(
+            "SELECT reltuples FROM pg_class WHERE relname = %s",
+            (r.seq_scan_table,),
+        ).fetchone()
+        if row is not None and row[0] < _SMALL_TABLE_THRESHOLD:
+            reason = (
+                f"seq scan on {r.seq_scan_table} "
+                f"({int(row[0]):,} rows — planner correctly skipped index)"
+            )
+            return "small-table", reason
+
+    if r.used_index is None:
+        return "fail", "no index used (seq scan on a non-small table)"
+    return "fail", f"used wrong index: {r.used_index}"
+
+
+def format_report(
+    plan: Plan,
+    load_url: str,
+    load_elapsed: float,
+    analyze_elapsed: float,
+    verdicts: list[tuple[QueryResult, str, str]],
+) -> str:
+    """Render the per-query report to a single multi-line string.
+
+    ``verdicts`` is a list of (QueryResult, classification, reason) tuples,
+    where classification is one of 'pass' / 'small-table' / 'fail'.
+    """
+    lines: list[str] = []
+    bar = "=" * 60
+    lines.append(bar)
+    lines.append(f"Load test report — N={plan.rows:,} measurements")
+    lines.append(f"Database: {load_url}")
+    lines.append(
+        f"Load: {load_elapsed:.1f}s "
+        f"({plan.measurements / load_elapsed:,.0f} measurements/sec)"
+    )
+    lines.append(f"Analyze: {analyze_elapsed:.2f}s")
+    lines.append(bar)
+    lines.append("")
+
+    glyph = {"pass": "✓", "small-table": "—", "fail": "✗"}
+    passes = small_tables = failures = 0
+
+    for i, (r, classification, reason) in enumerate(verdicts, start=1):
+        if classification == "pass":
+            passes += 1
+        elif classification == "small-table":
+            small_tables += 1
+        else:
+            failures += 1
+
+        lines.append(f"[{i}/{len(verdicts)}] {r.label}")
+        lines.append(f"       Index expected: {r.expected_index}")
+        lines.append(f"       SQL: {r.sql}")
+        lines.append(f"       Plan: {r.plan_summary}")
+        lines.append(f"       Execution time: {r.execution_time_ms:.3f} ms")
+        lines.append(f"       Verdict: {glyph[classification]} {reason}")
+        lines.append("")
+
+    lines.append(bar)
+    summary_parts = [f"{passes}/{len(verdicts)} ✓ used expected index"]
+    if small_tables:
+        summary_parts.append(f"{small_tables} — small-table seq scans (planner correct)")
+    if failures:
+        summary_parts.append(f"{failures} ✗ failed")
+    lines.append("Verdicts: " + "; ".join(summary_parts))
+    lines.append(bar)
+    return "\n".join(lines)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -544,15 +652,10 @@ def main(argv: list[str] | None = None) -> int:
 
         print("load_test: running benchmark queries...")
         results = run_benchmarks(conn)
+        verdicts = [(r, *_classify_verdict(conn, r)) for r in results]
 
-    rate = plan.measurements / load_elapsed if load_elapsed > 0 else float("inf")
-    print(f"load_test: loaded in {load_elapsed:.1f}s ({rate:,.0f} measurements/sec)")
-    print(f"load_test: analyzed in {analyze_elapsed:.2f}s")
-
-    for r in results:
-        verdict = "✓" if r.used_index == r.expected_index else "✗"
-        print(f"  {verdict} {r.label}: {r.plan_summary} ({r.execution_time_ms:.2f} ms)")
-
+    print()
+    print(format_report(plan, load_url, load_elapsed, analyze_elapsed, verdicts))
     return 0
 
 
