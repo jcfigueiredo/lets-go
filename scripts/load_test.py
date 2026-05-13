@@ -13,9 +13,13 @@ from __future__ import annotations
 
 import argparse
 import os
+import random
 import subprocess
 import sys
+import time
 from dataclasses import dataclass
+from datetime import UTC, datetime, timedelta
+from decimal import Decimal
 
 import psycopg
 
@@ -130,6 +134,163 @@ def truncate_all(conn: psycopg.Connection) -> None:
     """)
 
 
+_ROLES = (
+    "principal_investigator",
+    "lab_technician",
+    "graduate_student",
+    "postdoc",
+    "undergraduate",
+)
+_PROJECT_STATUSES = ("planning", "active", "completed", "cancelled")
+_EXPERIMENT_STATUSES = ("planned", "running", "completed", "cancelled")
+_SPECIMEN_TYPES = ("blood", "tissue", "soil", "chemical_compound", "water")
+_UNITS_NUMERIC = ("mg/dL", "ng/mL", "°C", "pH", "mmol/L")
+_VALUES_CATEGORICAL = ("positive", "negative", "pass", "fail", "inconclusive")
+_RNG = random.Random()  # module-level so each call deepens determinism across calls
+
+
+def bulk_load(conn: psycopg.Connection, plan: Plan) -> None:
+    """Bulk-insert N rows in dependency order via psycopg COPY.
+
+    Captures IDs from each insert phase to feed FKs in subsequent phases.
+    """
+    cur = conn.cursor()
+
+    # Phase 1: researchers (independent)
+    with cur.copy("COPY researchers (name, email, role) FROM STDIN") as cp:
+        for i in range(plan.researchers):
+            cp.write_row((
+                f"Researcher {i:05d}",
+                f"researcher-{i:05d}@lab.example",
+                _RNG.choice(_ROLES),
+            ))
+    researcher_ids = [row[0] for row in cur.execute(
+        "SELECT id FROM researchers ORDER BY id"
+    ).fetchall()]
+
+    # Phase 2: projects (independent)
+    with cur.copy("COPY projects (title, description, status) FROM STDIN") as cp:
+        for i in range(plan.projects):
+            cp.write_row((
+                f"Project {i:05d}",
+                f"Description for project {i:05d}.",
+                _RNG.choice(_PROJECT_STATUSES),
+            ))
+    project_ids = [row[0] for row in cur.execute(
+        "SELECT id FROM projects ORDER BY id"
+    ).fetchall()]
+
+    # Phase 3: project_researchers (m:n)
+    # Pick `plan.memberships` distinct (project, researcher) pairs.
+    pairs: set[tuple[int, int]] = set()
+    while len(pairs) < plan.memberships:
+        pairs.add((_RNG.choice(project_ids), _RNG.choice(researcher_ids)))
+    with cur.copy("COPY project_researchers (project_id, researcher_id) FROM STDIN") as cp:
+        for project_id, researcher_id in pairs:
+            cp.write_row((project_id, researcher_id))
+
+    # Phase 4: samples (independent)
+    base_dt = datetime(2026, 1, 1, tzinfo=UTC)
+    with cur.copy(
+        "COPY samples (accession_code, specimen_type, collected_at, storage_location) FROM STDIN"
+    ) as cp:
+        for i in range(plan.samples):
+            cp.write_row((
+                f"LOAD-{i:08d}",
+                _RNG.choice(_SPECIMEN_TYPES),
+                base_dt + timedelta(days=i),
+                f"Freezer {i % 10} / Shelf {i % 5} / Box {i % 20}",
+            ))
+    sample_ids = [row[0] for row in cur.execute(
+        "SELECT id FROM samples ORDER BY id"
+    ).fetchall()]
+
+    # Phase 5: experiments (depend on projects; some reference earlier experiments)
+    with cur.copy(
+        "COPY experiments (project_id, title, hypothesis, start_date, end_date, status) FROM STDIN"
+    ) as cp:
+        for i in range(plan.experiments):
+            start = (base_dt + timedelta(days=i * 7)).date()
+            end = start + timedelta(days=14)
+            cp.write_row((
+                _RNG.choice(project_ids),
+                f"Experiment {i:05d}",
+                f"Hypothesis text for experiment {i:05d}.",
+                start,
+                end,
+                _RNG.choice(_EXPERIMENT_STATUSES),
+            ))
+    experiment_ids = [row[0] for row in cur.execute(
+        "SELECT id FROM experiments ORDER BY id"
+    ).fetchall()]
+
+    # Phase 5b: backfill follows_up_experiment_id on ~10% of experiments
+    # (only ones whose id > the smallest id, so they reference an earlier one)
+    follow_up_count = max(plan.experiments // 10, 1)
+    candidates = experiment_ids[1:]  # exclude the first (no earlier experiment exists)
+    if candidates:
+        for child_id in _RNG.sample(candidates, k=min(follow_up_count, len(candidates))):
+            parent_id = _RNG.choice([e for e in experiment_ids if e < child_id])
+            cur.execute(
+                "UPDATE experiments SET follows_up_experiment_id = %s WHERE id = %s",
+                (parent_id, child_id),
+            )
+
+    # Phase 6: experiment_samples (m:n)
+    es_pairs: set[tuple[int, int]] = set()
+    while len(es_pairs) < plan.experiment_samples:
+        es_pairs.add((_RNG.choice(experiment_ids), _RNG.choice(sample_ids)))
+    with cur.copy("COPY experiment_samples (experiment_id, sample_id) FROM STDIN") as cp:
+        for experiment_id, sample_id in es_pairs:
+            cp.write_row((experiment_id, sample_id))
+
+    # Phase 7: measurements (the headline volume)
+    with cur.copy(
+        """COPY measurements (
+            experiment_id, sample_id, recorded_by, recorded_at,
+            kind, numeric_value, unit, categorical_value, text_value, notes
+        ) FROM STDIN"""
+    ) as cp:
+        for i in range(plan.measurements):
+            kind = _RNG.choices(
+                ("numeric", "categorical", "text"),
+                weights=(60, 30, 10),
+            )[0]
+            experiment_id = _RNG.choice(experiment_ids)
+            sample_id = _RNG.choice(sample_ids) if _RNG.random() > 0.05 else None
+            recorded_by = _RNG.choice(researcher_ids)
+            recorded_at = base_dt + timedelta(seconds=i * 30)
+
+            if kind == "numeric":
+                numeric_value = Decimal(str(round(_RNG.uniform(0, 300), 2)))
+                unit = _RNG.choice(_UNITS_NUMERIC)
+                categorical_value = None
+                text_value = None
+            elif kind == "categorical":
+                numeric_value = None
+                unit = None
+                categorical_value = _RNG.choice(_VALUES_CATEGORICAL)
+                text_value = None
+            else:  # text
+                numeric_value = None
+                unit = None
+                categorical_value = None
+                text_value = f"Observation note {i:08d}."
+
+            cp.write_row((
+                experiment_id,
+                sample_id,
+                recorded_by,
+                recorded_at,
+                kind,
+                numeric_value,
+                unit,
+                categorical_value,
+                text_value,
+                None,  # notes
+            ))
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         prog="load_test",
@@ -153,11 +314,15 @@ def main(argv: list[str] | None = None) -> int:
     print(f"load_test: applying migrations to {load_url}...")
     migrate(load_url)
 
-    print("load_test: truncating data tables...")
+    print(f"load_test: bulk loading {plan.measurements:,} measurements (+ supporting rows)...")
     with psycopg.connect(_psycopg_url(load_url)) as conn:
         truncate_all(conn)
+        t0 = time.monotonic()
+        bulk_load(conn, plan)
         conn.commit()
-    print("load_test: tables truncated")
+        load_elapsed = time.monotonic() - t0
+    rate = plan.measurements / load_elapsed if load_elapsed > 0 else float("inf")
+    print(f"load_test: loaded in {load_elapsed:.1f}s ({rate:,.0f} measurements/sec)")
 
     return 0
 
