@@ -10,6 +10,7 @@ from sqlmodel import SQLModel
 from lab.models.project import Project, ProjectStatus
 from lab.models.project_researcher import ProjectResearcher
 from lab.models.researcher import Researcher, ResearcherRole
+from lab.models.sample import Sample
 
 __all__ = [
     "SQLModel",
@@ -18,4 +19,5 @@ __all__ = [
     "ProjectResearcher",
     "Researcher",
     "ResearcherRole",
+    "Sample",
 ]

@@ -9,6 +9,8 @@ a UNIQUE constraint on the seed anchor (e.g. ``projects.title``), use a
 check-then-insert pattern.
 """
 
+from datetime import UTC, datetime
+
 from sqlalchemy.dialects.postgresql import insert
 from sqlmodel import Session, select
 
@@ -19,6 +21,7 @@ from lab.models import (
     ProjectStatus,
     Researcher,
     ResearcherRole,
+    Sample,
 )
 
 
@@ -80,11 +83,27 @@ def _seed_memberships(session: Session) -> None:
     session.execute(stmt)
 
 
+def _seed_samples(session: Session) -> None:
+    """Three canonical samples (two blood + one soil) covering both projects.
+
+    Idempotent via ``INSERT … ON CONFLICT DO NOTHING`` anchored on the UNIQUE
+    ``accession_code`` column.
+    """
+    data = [
+        {"accession_code": "GTS-001", "specimen_type": "blood", "collected_at": datetime(2026, 1, 15, tzinfo=UTC), "storage_location": "Freezer A / Shelf 1"},
+        {"accession_code": "GTS-002", "specimen_type": "blood", "collected_at": datetime(2026, 2, 10, tzinfo=UTC), "storage_location": "Freezer A / Shelf 1"},
+        {"accession_code": "SMS-001", "specimen_type": "soil",  "collected_at": datetime(2026, 3, 1,  tzinfo=UTC), "storage_location": "Cabinet 4 / Bin 7"},
+    ]
+    stmt = insert(Sample).values(data).on_conflict_do_nothing(index_elements=["accession_code"])
+    session.execute(stmt)
+
+
 def seed(session: Session) -> None:
     """Apply seed data idempotently."""
     _seed_researchers(session)
     _seed_projects(session)
     _seed_memberships(session)
+    _seed_samples(session)
 
 
 if __name__ == "__main__":  # pragma: no cover

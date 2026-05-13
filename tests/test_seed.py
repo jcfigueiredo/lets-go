@@ -1,6 +1,6 @@
 from sqlmodel import Session, select, func
 
-from lab.models import Project, ProjectResearcher, Researcher
+from lab.models import Project, ProjectResearcher, Researcher, Sample
 from lab.seed import seed
 
 
@@ -33,6 +33,14 @@ def test_seed_creates_memberships(db: Session):
     assert count == 4
 
 
+def test_seed_creates_samples(db: Session):
+    seed(db)
+    db.flush()
+
+    count = db.exec(select(func.count()).select_from(Sample)).one()
+    assert count == 3
+
+
 def test_seed_satisfies_multi_researcher_scenario(db: Session):
     """Spec scenario: at least one project with multiple researchers."""
     seed(db)
@@ -57,6 +65,7 @@ def test_seed_is_idempotent(db: Session):
     r1 = db.exec(select(func.count()).select_from(Researcher)).one()
     p1 = db.exec(select(func.count()).select_from(Project)).one()
     m1 = db.exec(select(func.count()).select_from(ProjectResearcher)).one()
+    s1 = db.exec(select(func.count()).select_from(Sample)).one()
 
     # Mutate one of each kind; if seed accidentally upserts, mutations revert.
     alice = db.exec(select(Researcher).where(Researcher.email == "alice@lab.example")).one()
@@ -79,6 +88,7 @@ def test_seed_is_idempotent(db: Session):
     r2 = db.exec(select(func.count()).select_from(Researcher)).one()
     p2 = db.exec(select(func.count()).select_from(Project)).one()
     m2 = db.exec(select(func.count()).select_from(ProjectResearcher)).one()
+    s2 = db.exec(select(func.count()).select_from(Sample)).one()
     alice_after = db.exec(select(Researcher).where(Researcher.email == "alice@lab.example")).one()
     glucose_after = db.exec(select(Project).where(Project.title == "Glucose Tolerance Study")).one()
     alice_glucose_after = db.exec(
@@ -88,7 +98,7 @@ def test_seed_is_idempotent(db: Session):
         )
     ).one()
 
-    assert (r1, p1, m1) == (r2, p2, m2) == (4, 2, 4)
+    assert (r1, p1, m1, s1) == (r2, p2, m2, s2) == (4, 2, 4, 3)
     assert alice_after.name == "Alice Tan (renamed)", "Seed must not overwrite existing researchers"
     assert glucose_after.description == "Mutated description", "Seed must not overwrite existing projects"
     assert alice_glucose_after.joined_at == alice_glucose_joined_at, (

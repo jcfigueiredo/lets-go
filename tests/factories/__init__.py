@@ -14,10 +14,12 @@ from types import SimpleNamespace
 
 from tests.factories.project import ProjectFactory
 from tests.factories.researcher import ResearcherFactory
+from tests.factories.sample import SampleFactory
 
 ALL_FACTORIES: list[type] = [
     ProjectFactory,
     ResearcherFactory,
+    SampleFactory,
 ]
 
 
@@ -26,4 +28,5 @@ def factory_namespace() -> SimpleNamespace:
     return SimpleNamespace(
         project=ProjectFactory,
         researcher=ResearcherFactory,
+        sample=SampleFactory,
     )
