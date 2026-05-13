@@ -13,7 +13,13 @@ from sqlalchemy.dialects.postgresql import insert
 from sqlmodel import Session, select
 
 from lab.db import engine
-from lab.models import Project, ProjectStatus, Researcher, ResearcherRole
+from lab.models import (
+    Project,
+    ProjectResearcher,
+    ProjectStatus,
+    Researcher,
+    ResearcherRole,
+)
 
 
 def _seed_researchers(session: Session) -> None:
@@ -43,10 +49,39 @@ def _seed_projects(session: Session) -> None:
             session.add(Project(**row))
 
 
+def _seed_memberships(session: Session) -> None:
+    """Assign researchers to projects.
+
+    Satisfies the multi-researcher spec scenario: Glucose Tolerance Study gets
+    Alice (PI), Bob (technician), Carol (grad student). Soil Microbiome Survey
+    gets Alice as a single-researcher control case.
+
+    Idempotent via ``INSERT … ON CONFLICT DO NOTHING`` on the composite PK
+    (defaulted when no ``index_elements`` are supplied).
+    """
+    session.flush()  # ensure researchers + projects have IDs
+
+    glucose = session.exec(select(Project).where(Project.title == "Glucose Tolerance Study")).one()
+    soil = session.exec(select(Project).where(Project.title == "Soil Microbiome Survey")).one()
+    alice = session.exec(select(Researcher).where(Researcher.email == "alice@lab.example")).one()
+    bob = session.exec(select(Researcher).where(Researcher.email == "bob@lab.example")).one()
+    carol = session.exec(select(Researcher).where(Researcher.email == "carol@lab.example")).one()
+
+    memberships = [
+        {"project_id": glucose.id, "researcher_id": alice.id},
+        {"project_id": glucose.id, "researcher_id": bob.id},
+        {"project_id": glucose.id, "researcher_id": carol.id},
+        {"project_id": soil.id,    "researcher_id": alice.id},
+    ]
+    stmt = insert(ProjectResearcher).values(memberships).on_conflict_do_nothing()
+    session.execute(stmt)
+
+
 def seed(session: Session) -> None:
     """Apply seed data idempotently."""
     _seed_researchers(session)
     _seed_projects(session)
+    _seed_memberships(session)
 
 
 if __name__ == "__main__":  # pragma: no cover

@@ -8,6 +8,14 @@ registered before autogenerate runs.
 from sqlmodel import SQLModel
 
 from lab.models.project import Project, ProjectStatus
+from lab.models.project_researcher import ProjectResearcher
 from lab.models.researcher import Researcher, ResearcherRole
 
-__all__ = ["SQLModel", "Project", "ProjectStatus", "Researcher", "ResearcherRole"]
+__all__ = [
+    "SQLModel",
+    "Project",
+    "ProjectStatus",
+    "ProjectResearcher",
+    "Researcher",
+    "ResearcherRole",
+]
